@@ -1,0 +1,742 @@
+:root {
+  --bg: #f5f7f6;
+  --panel: #ffffff;
+  --text: #17201c;
+  --muted: #5c6d66;
+  --line: #d9e1dd;
+  --accent: #0b6b5c;
+  --accent-strong: #06483f;
+  --accent-soft: #dff1ec;
+  --amber: #8a5a00;
+  --amber-soft: #fff0ce;
+  --red: #9f2b2b;
+  --red-soft: #ffe3df;
+  --blue: #235d91;
+  --blue-soft: #e1effb;
+  --shadow: 0 18px 40px rgba(30, 46, 39, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.45;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 32px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header h1,
+.section-heading h2,
+.dialog-header h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.app-header h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 0.95;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 0.77rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.header-actions,
+.capture-actions,
+.dialog-actions,
+.dialog-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compact-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.compact-actions input {
+  width: 150px;
+}
+
+.workspace-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 14px 32px 0;
+}
+
+.workspace-tabs button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  min-height: 38px;
+  padding: 0 18px;
+  font-weight: 700;
+}
+
+.workspace-tabs button.active {
+  background: var(--text);
+  color: #fff;
+}
+
+.app-shell {
+  padding: 18px;
+}
+
+.workspace-section {
+  display: none;
+}
+
+.workspace-section.active {
+  display: grid;
+  gap: 18px;
+}
+
+#meetingsView.active {
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+}
+
+.meetings-panel {
+  grid-column: 1 / -1;
+}
+
+.capture-panel,
+.review-panel,
+.dashboard-panel,
+.meetings-panel,
+.day-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.section-heading,
+.dashboard-heading,
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.section-heading h2 {
+  font-size: 1.35rem;
+}
+
+.compact-heading {
+  margin-bottom: 10px;
+}
+
+.compact-heading h2 {
+  font-size: 1.1rem;
+}
+
+.edit-status {
+  margin: 8px 0 0;
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.import-status {
+  margin: -6px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfc;
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.capture-panel.editing {
+  border-color: rgba(11, 107, 92, 0.45);
+  box-shadow: 0 0 0 4px rgba(11, 107, 92, 0.1), var(--shadow);
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  padding: 10px 11px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.note-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note-toolbar button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.note-toolbar button:hover {
+  color: var(--accent-strong);
+  border-color: rgba(11, 107, 92, 0.35);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  outline: 3px solid rgba(11, 107, 92, 0.25);
+  outline-offset: 2px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.text-button,
+.danger-button,
+.icon-button {
+  border: 0;
+  border-radius: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.secondary-button,
+.ghost-button {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.text-button {
+  background: transparent;
+  color: var(--muted);
+}
+
+.danger-button {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.icon-button {
+  width: 40px;
+  padding: 0;
+  background: #edf2ef;
+  color: var(--text);
+  font-size: 1.45rem;
+}
+
+.full-width {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+#importFile,
+#icsFile,
+#icsFileList {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+}
+
+.suggestion-list {
+  display: grid;
+  gap: 10px;
+  min-height: 112px;
+}
+
+.suggestion-list.empty {
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.suggestion-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 140px 110px;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.suggestion-row input[type="checkbox"] {
+  margin-top: 10px;
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.summary-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfc;
+}
+
+.summary-item strong {
+  display: block;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.summary-item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.view-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.view-tabs button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  min-height: 36px;
+  padding: 0 15px;
+  font-weight: 700;
+}
+
+.view-tabs button.active {
+  background: var(--text);
+  color: #fff;
+}
+
+.task-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(170px, 260px);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.task-board {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+
+.meeting-list {
+  display: grid;
+  gap: 10px;
+}
+
+.meeting-card {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-left: 7px solid var(--blue);
+  border-radius: 8px;
+  background: #fff;
+  padding: 13px;
+}
+
+.meeting-main,
+.task-main,
+.tag {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.meeting-time {
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.meeting-main h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.meeting-main p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.note-preview {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.note-preview p,
+.note-preview ul,
+.note-preview h4,
+.note-preview h5,
+.note-preview h6 {
+  margin: 0 0 8px;
+}
+
+.note-preview ul {
+  padding-left: 18px;
+}
+
+.note-preview li {
+  margin-bottom: 4px;
+}
+
+.note-preview h4,
+.note-preview h5,
+.note-preview h6 {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.note-preview hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 8px 0;
+}
+
+.note-preview.compact {
+  max-height: 140px;
+  overflow: hidden;
+}
+
+.note-preview-more {
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.note-expand-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  min-height: 28px;
+  padding: 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.meeting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.meeting-actions button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.meeting-actions .delete-meeting-action {
+  border-color: rgba(174, 42, 42, 0.2);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.project-group {
+  display: grid;
+  gap: 10px;
+}
+
+.project-title {
+  margin: 12px 0 0;
+  color: var(--accent-strong);
+  font-size: 1rem;
+}
+
+.task-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-left: 7px solid var(--accent);
+  border-radius: 8px;
+  background: #fff;
+  padding: 13px;
+}
+
+.task-card.p1 {
+  border-left-color: var(--red);
+}
+
+.task-card.p2 {
+  border-left-color: var(--amber);
+}
+
+.task-card.done {
+  border-left-color: var(--line);
+  background: #f7f9f8;
+  opacity: 0.72;
+}
+
+.task-card.done .task-main h3 {
+  text-decoration: line-through;
+}
+
+.task-card.done .tag {
+  background: #eef1ef;
+  color: var(--muted);
+}
+
+.task-card input[type="checkbox"] {
+  margin-top: 4px;
+  width: 22px;
+  height: 22px;
+}
+
+.task-main h3 {
+  margin: 0 0 7px;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.task-main p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  border-radius: 999px;
+  background: #eef3f1;
+  color: #33433d;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.tag.p1 {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.tag.p2 {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.tag.waiting {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.task-actions button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 28px;
+  text-align: center;
+}
+
+dialog {
+  width: min(760px, calc(100vw - 28px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.25);
+}
+
+dialog::backdrop {
+  background: rgba(10, 18, 15, 0.5);
+}
+
+.task-form {
+  padding: 18px;
+}
+
+.meeting-dialog-form textarea {
+  min-height: 180px;
+}
+
+.note-preview-dialog {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.note-preview-editor {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  margin: 0 0 12px;
+  padding: 12px;
+}
+
+.full-field {
+  margin-bottom: 12px;
+}
+
+.dialog-actions {
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .app-header,
+  .workspace-tabs,
+  .app-shell {
+    padding-inline: 12px;
+  }
+
+  .app-header,
+  .section-heading,
+  .dashboard-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  #meetingsView.active,
+  .dashboard-grid,
+  .form-grid,
+  .summary-strip,
+  .task-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestion-row {
+    grid-template-columns: 28px 1fr;
+  }
+
+  .suggestion-row select {
+    grid-column: 2;
+  }
+
+  .task-card {
+    grid-template-columns: 32px 1fr;
+  }
+
+  .meeting-card {
+    grid-template-columns: 1fr;
+  }
+
+  .task-actions {
+    grid-column: 2;
+  }
+}

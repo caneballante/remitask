@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meeting Notes Task Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Partnership Work</p>
+        <h1>Task Dashboard</h1>
+      </div>
+      <div class="header-actions">
+        <button class="ghost-button" id="exportButton" type="button">Export</button>
+        <label class="ghost-button file-button" for="importFile">Import</label>
+        <input id="importFile" type="file" accept="application/json">
+      </div>
+    </header>
+
+    <nav class="workspace-tabs" aria-label="Workspace sections">
+      <button class="active" type="button" data-section="dashboard">Dashboard</button>
+      <button type="button" data-section="meetings">Meetings</button>
+      <button type="button" data-section="tasks">Tasks</button>
+    </nav>
+
+    <main class="app-shell">
+      <section id="dashboardView" class="workspace-section active dashboard-panel" aria-labelledby="dashboardTitle">
+        <div class="section-heading dashboard-heading">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h2 id="dashboardTitle">Today</h2>
+          </div>
+          <div class="header-actions compact-actions">
+            <input id="agendaDate" type="date" aria-label="Agenda date">
+            <button id="newMeetingButton" class="secondary-button" type="button">Add Meeting</button>
+            <button id="newTaskButton" class="primary-button" type="button">New Task</button>
+          </div>
+        </div>
+
+        <div class="summary-strip" id="summaryStrip"></div>
+
+        <div class="dashboard-grid">
+          <section class="day-panel" aria-labelledby="dayTitle">
+            <div class="section-heading compact-heading">
+              <div>
+                <p class="eyebrow">Agenda</p>
+                <h2 id="dayTitle">Meetings</h2>
+              </div>
+            </div>
+            <div id="todayMeetings" class="meeting-list"></div>
+          </section>
+
+          <section class="day-panel" aria-labelledby="todayTasksTitle">
+            <div class="section-heading compact-heading">
+              <div>
+                <p class="eyebrow">Focus</p>
+                <h2 id="todayTasksTitle">Tasks</h2>
+              </div>
+            </div>
+            <div id="todayTaskBoard" class="task-board"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="meetingsView" class="workspace-section">
+        <section class="capture-panel" aria-labelledby="captureTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Meetings</p>
+              <h2 id="captureTitle">Add / Edit Meeting</h2>
+              <p id="meetingEditStatus" class="edit-status" hidden></p>
+            </div>
+            <div class="header-actions compact-actions">
+              <button id="newMeetingButtonMeetings" class="ghost-button" type="button">New Meeting</button>
+              <label class="ghost-button file-button" for="icsFile">Import .ics</label>
+              <input id="icsFile" type="file" accept=".ics,text/calendar">
+              <button id="saveMeetingButton" class="secondary-button" type="button">Save Meeting</button>
+            </div>
+          </div>
+          <p id="icsImportStatus" class="import-status" hidden></p>
+
+          <form id="meetingForm" class="note-form" tabindex="-1">
+            <input id="meetingId" type="hidden">
+            <div class="form-grid">
+              <label>
+                Meeting
+                <input id="meetingTitle" type="text" placeholder="Ian one-on-one">
+              </label>
+              <label>
+                Project
+                <input id="meetingProject" type="text" list="projectOptions" placeholder="Media / GovDelivery">
+              </label>
+              <label>
+                Date
+                <input id="meetingDate" type="date">
+              </label>
+              <label>
+                Start
+                <input id="meetingStart" type="time">
+              </label>
+              <label>
+                End
+                <input id="meetingEnd" type="time">
+              </label>
+              <label>
+                Location
+                <input id="meetingLocation" type="text" placeholder="Zoom / conference room">
+              </label>
+            </div>
+            <label class="full-field">
+              Attendees
+              <input id="meetingAttendees" type="text" placeholder="Ian, Katie, Chase">
+            </label>
+            <label>
+              Notes
+              <div class="note-toolbar" aria-label="Note formatting tools">
+                <button type="button" data-note-tool="bold" data-note-target="meetingNotes">Bold</button>
+                <button type="button" data-note-tool="bullet" data-note-target="meetingNotes">Bullet</button>
+                <button type="button" data-note-tool="task" data-note-target="meetingNotes">Task</button>
+                <button type="button" data-note-tool="heading" data-note-target="meetingNotes">Heading</button>
+                <button type="button" data-note-tool="divider" data-note-target="meetingNotes">Divider</button>
+              </div>
+              <textarea id="meetingNotes" rows="12" placeholder="Type notes freely. Lines with words like send, schedule, check, clarify, waiting, risk, or question will be suggested as tasks."></textarea>
+            </label>
+            <div id="meetingNotesPreview" class="note-preview note-preview-editor" hidden></div>
+            <div class="capture-actions">
+              <button id="saveMeetingButtonInline" class="primary-button" type="button">Save Meeting</button>
+              <button id="processButton" class="secondary-button" type="button">Extract Tasks</button>
+              <button id="clearMeetingButton" class="text-button" type="button">Clear</button>
+              <button id="deleteMeetingButton" class="danger-button" type="button" hidden>Delete</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="review-panel" aria-labelledby="reviewTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Review</p>
+              <h2 id="reviewTitle">Suggested Tasks</h2>
+            </div>
+            <button id="addSuggestionButton" class="secondary-button" type="button">Add Row</button>
+          </div>
+          <div id="suggestionList" class="suggestion-list empty">
+            <p>No suggestions yet.</p>
+          </div>
+          <button id="addSuggestionsButton" class="primary-button full-width" type="button" disabled>Add Selected Tasks</button>
+        </section>
+
+        <section class="meetings-panel" aria-labelledby="meetingsListTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Schedule</p>
+              <h2 id="meetingsListTitle">All Meetings</h2>
+            </div>
+            <div class="header-actions compact-actions">
+              <label class="ghost-button file-button" for="icsFileList">Import .ics</label>
+              <input id="icsFileList" type="file" accept=".ics,text/calendar">
+              <button id="newMeetingButtonList" class="secondary-button" type="button">New Meeting</button>
+            </div>
+          </div>
+          <div id="meetingList" class="meeting-list"></div>
+        </section>
+      </section>
+
+      <section id="tasksView" class="workspace-section dashboard-panel" aria-labelledby="tasksTitle">
+        <div class="section-heading dashboard-heading">
+          <div>
+            <p class="eyebrow">Tasks</p>
+            <h2 id="tasksTitle">Task List</h2>
+          </div>
+          <button id="newTaskButtonTasks" class="primary-button" type="button">New Task</button>
+        </div>
+
+        <nav class="view-tabs" aria-label="Task views">
+          <button class="active" type="button" data-view="today">Today</button>
+          <button type="button" data-view="next">Next</button>
+          <button type="button" data-view="waiting">Waiting</button>
+          <button type="button" data-view="projects">Projects</button>
+          <button type="button" data-view="done">Done</button>
+        </nav>
+
+        <div class="task-toolbar">
+          <label>
+            Search
+            <input id="taskSearch" type="search" placeholder="Filter tasks">
+          </label>
+          <label>
+            Project
+            <select id="projectFilter">
+              <option value="">All projects</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="taskBoard" class="task-board"></div>
+      </section>
+    </main>
+
+    <dialog id="meetingDialog">
+      <form method="dialog" id="meetingDialogForm" class="task-form meeting-dialog-form">
+        <div class="dialog-header">
+          <h2 id="meetingDialogTitle">Edit Meeting</h2>
+          <button class="icon-button" id="closeMeetingDialogButton" type="button" aria-label="Close">×</button>
+        </div>
+
+        <input id="dialogMeetingId" type="hidden">
+        <div class="form-grid">
+          <label>
+            Meeting
+            <input id="dialogMeetingTitle" type="text" placeholder="Ian one-on-one">
+          </label>
+          <label>
+            Project
+            <input id="dialogMeetingProject" type="text" list="projectOptions" placeholder="Media / GovDelivery">
+          </label>
+          <label>
+            Date
+            <input id="dialogMeetingDate" type="date">
+          </label>
+          <label>
+            Start
+            <input id="dialogMeetingStart" type="time">
+          </label>
+          <label>
+            End
+            <input id="dialogMeetingEnd" type="time">
+          </label>
+          <label>
+            Location
+            <input id="dialogMeetingLocation" type="text" placeholder="Zoom / conference room">
+          </label>
+        </div>
+
+        <label class="full-field">
+          Attendees
+          <input id="dialogMeetingAttendees" type="text" placeholder="Ian, Katie, Chase">
+        </label>
+        <label class="full-field">
+          Notes
+          <div class="note-toolbar" aria-label="Note formatting tools">
+            <button type="button" data-note-tool="bold" data-note-target="dialogMeetingNotes">Bold</button>
+            <button type="button" data-note-tool="bullet" data-note-target="dialogMeetingNotes">Bullet</button>
+            <button type="button" data-note-tool="task" data-note-target="dialogMeetingNotes">Task</button>
+            <button type="button" data-note-tool="heading" data-note-target="dialogMeetingNotes">Heading</button>
+            <button type="button" data-note-tool="divider" data-note-target="dialogMeetingNotes">Divider</button>
+          </div>
+          <textarea id="dialogMeetingNotes" rows="10"></textarea>
+        </label>
+        <div id="dialogMeetingNotesPreview" class="note-preview note-preview-dialog" hidden></div>
+
+        <div class="dialog-actions">
+          <button id="deleteMeetingDialogButton" class="danger-button" type="button">Delete</button>
+          <div>
+            <button class="secondary-button" id="cancelMeetingDialogButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveMeetingDialogButton" type="submit">Save Meeting</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="taskDialog">
+      <form method="dialog" id="taskForm" class="task-form">
+        <div class="dialog-header">
+          <h2 id="dialogTitle">Edit Task</h2>
+          <button class="icon-button" id="closeDialogButton" type="button" aria-label="Close">×</button>
+        </div>
+
+        <input id="taskId" type="hidden">
+        <label class="full-field">
+          Task
+          <textarea id="taskTitle" rows="3" required></textarea>
+        </label>
+
+        <div class="form-grid">
+          <label>
+            Project
+            <input id="taskProject" type="text" list="projectOptions" required>
+          </label>
+          <label>
+            Status
+            <select id="taskStatus">
+              <option>Inbox</option>
+              <option>Today</option>
+              <option>Next</option>
+              <option>Waiting</option>
+              <option>Scheduled</option>
+              <option>Done</option>
+              <option>Someday</option>
+            </select>
+          </label>
+          <label>
+            Priority
+            <select id="taskPriority">
+              <option>P1</option>
+              <option>P2</option>
+              <option>P3</option>
+            </select>
+          </label>
+          <label>
+            Effort
+            <select id="taskEffort">
+              <option>Quick</option>
+              <option>Medium</option>
+              <option>Deep</option>
+            </select>
+          </label>
+          <label>
+            Energy
+            <select id="taskEnergy">
+              <option>Low-focus</option>
+              <option>Normal</option>
+              <option>High-focus</option>
+            </select>
+          </label>
+          <label>
+            Context
+            <select id="taskContext">
+              <option>Email</option>
+              <option>Meeting</option>
+              <option>Writing</option>
+              <option>Website</option>
+              <option>Design</option>
+              <option>Follow-up</option>
+              <option>Admin</option>
+            </select>
+          </label>
+          <label>
+            Owner
+            <input id="taskOwner" type="text" placeholder="Jon">
+          </label>
+          <label>
+            Due
+            <input id="taskDue" type="date">
+          </label>
+        </div>
+
+        <label class="full-field">
+          Notes
+          <textarea id="taskNotes" rows="4"></textarea>
+        </label>
+
+        <div class="dialog-actions">
+          <button id="deleteTaskButton" class="danger-button" type="button">Delete</button>
+          <div>
+            <button class="secondary-button" id="cancelTaskButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveTaskButton" type="submit">Save Task</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <datalist id="projectOptions"></datalist>
+    <script src="app.js"></script>
+  </body>
+</html>

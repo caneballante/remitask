@@ -1667,7 +1667,7 @@ function normalizeMeeting(raw: Partial<Meeting>): Meeting {
     calendarUid: cleanText(raw.calendarUid),
     title: cleanText(raw.title) || "Untitled meeting",
     project: cleanText(raw.project),
-    date: cleanText(raw.date) || todayIso(),
+    date: dateOnly(raw.date) || todayIso(),
     start: cleanText(raw.start),
     end: cleanText(raw.end),
     location: cleanText(raw.location),
@@ -1690,7 +1690,7 @@ function normalizeTask(raw: Partial<Task>): Task {
     energy: pickValue(raw.energy, TASK_ENERGIES, "Normal"),
     context: pickValue(raw.context, TASK_CONTEXTS, "Follow-up"),
     owner: cleanText(raw.owner),
-    due: cleanText(raw.due),
+    due: dateOnly(raw.due),
     notes: cleanText(raw.notes),
     meetingId: cleanText(raw.meetingId),
     createdAt: cleanText(raw.createdAt) || now,
@@ -1705,7 +1705,7 @@ function blankMeeting(date: string): Meeting {
     calendarUid: "",
     title: "",
     project: "",
-    date: date || todayIso(),
+    date: dateOnly(date) || todayIso(),
     start: "",
     end: "",
     location: "",
@@ -2018,13 +2018,14 @@ function meetingDateTime(meeting: Meeting) {
 }
 
 function formatDate(dateString: string) {
-  if (!dateString) return "No date";
-  const date = safeDate(`${dateString}T12:00:00`);
-  if (!date) return dateString;
+  const normalizedDate = dateOnly(dateString);
+  if (!normalizedDate) return "No date";
+  const date = safeDate(`${normalizedDate}T12:00:00`);
+  if (!date) return normalizedDate;
   try {
     return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
   } catch {
-    return dateString;
+    return normalizedDate;
   }
 }
 
@@ -2062,6 +2063,15 @@ function normalizeText(text: string) {
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function dateOnly(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = cleanText(value);
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const date = safeDate(text);
+  return date ? date.toISOString().slice(0, 10) : "";
 }
 
 function pickValue<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]) {

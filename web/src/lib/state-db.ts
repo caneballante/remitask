@@ -6,14 +6,14 @@ type MeetingRow = {
   calendar_uid: string | null;
   title: string;
   project: string;
-  date: string | null;
+  date: DateValue;
   start_time: string;
   end_time: string;
   location: string;
   attendees: string;
   notes: string;
-  created_at: string;
-  updated_at: string;
+  created_at: DateValue;
+  updated_at: DateValue;
 };
 
 type TaskRow = {
@@ -26,12 +26,14 @@ type TaskRow = {
   energy: Task["energy"];
   context: Task["context"];
   owner: string;
-  due: string | null;
+  due: DateValue;
   notes: string;
   meeting_id: string | null;
-  created_at: string;
-  completed_at: string | null;
+  created_at: DateValue;
+  completed_at: DateValue;
 };
+
+type DateValue = string | Date | null;
 
 export async function loadState(): Promise<AppState> {
   const sql = getSql();
@@ -77,7 +79,7 @@ export async function saveState(state: AppState): Promise<AppState> {
         ${meeting.calendarUid || null},
         ${meeting.title || ""},
         ${meeting.project || ""},
-        ${meeting.date || null},
+        ${toDateOnly(meeting.date || null) || null},
         ${meeting.start || ""},
         ${meeting.end || ""},
         ${meeting.location || ""},
@@ -101,7 +103,7 @@ export async function saveState(state: AppState): Promise<AppState> {
         ${task.energy || "Normal"},
         ${task.context || "Follow-up"},
         ${task.owner || ""},
-        ${task.due || null},
+        ${toDateOnly(task.due || null) || null},
         ${task.notes || ""},
         ${task.meetingId || null},
         ${task.createdAt || new Date().toISOString()},
@@ -119,7 +121,7 @@ function meetingFromRow(row: MeetingRow): Meeting {
     calendarUid: row.calendar_uid || "",
     title: row.title,
     project: row.project,
-    date: row.date || "",
+    date: toDateOnly(row.date),
     start: row.start_time,
     end: row.end_time,
     location: row.location,
@@ -141,7 +143,7 @@ function taskFromRow(row: TaskRow): Task {
     energy: row.energy,
     context: row.context,
     owner: row.owner,
-    due: row.due || "",
+    due: toDateOnly(row.due),
     notes: row.notes,
     meetingId: row.meeting_id || "",
     createdAt: toIso(row.created_at),
@@ -149,6 +151,16 @@ function taskFromRow(row: TaskRow): Task {
   };
 }
 
-function toIso(value: string) {
+function toIso(value: DateValue) {
+  if (!value) return new Date().toISOString();
   return new Date(value).toISOString();
+}
+
+function toDateOnly(value: DateValue) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
 }

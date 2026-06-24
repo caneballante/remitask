@@ -25,6 +25,14 @@ This is now a local-first browser app backed by SQLite:
 
 There is no build step and no package manager yet. The server uses only Python standard-library modules.
 
+A hosted rebuild has been started in:
+
+```text
+web/
+```
+
+The web app is a separate Next.js App Router project connected to Neon through a lazy database helper. The local SQLite app should remain the stable reference while web workflows are rebuilt.
+
 To run locally:
 
 ```sh

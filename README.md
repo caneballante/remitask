@@ -44,6 +44,29 @@ OPENAI_API_KEY=sk-your-api-key-here
 
 Restart `python server.py` after adding the key. If no key is present, the app falls back to its local rule-based extractor.
 
+## Hosted Web Migration
+
+The hosted rebuild lives in `web/`. It is a separate Next.js app so the local SQLite version can stay stable while the website is built.
+
+From `web/`:
+
+```sh
+npm run lint
+npm run build
+```
+
+Add your Neon connection string to `web/.env.local`:
+
+```text
+DATABASE_URL=postgresql://...
+```
+
+Then initialize the Neon schema:
+
+```sh
+npm run db:migrate
+```
+
 ## Main Features
 
 - Meeting entry and editing

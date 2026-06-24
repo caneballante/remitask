@@ -1334,7 +1334,7 @@ function SuggestionPanel({
       {suggestions.length ? (
         <div className="mt-3 grid gap-2">
           {suggestions.map((suggestion, index) => (
-            <div key={`${suggestion.title}-${index}`} className="grid gap-2 rounded-md border border-[#d9e1dd] bg-white p-3 lg:grid-cols-[auto_minmax(220px,1fr)_minmax(160px,220px)_6rem]">
+            <div key={`suggestion-${index}`} className="grid gap-2 rounded-md border border-[#d9e1dd] bg-white p-3 lg:grid-cols-[auto_minmax(220px,1fr)_minmax(160px,220px)_6rem]">
               <input
                 className="mt-2 h-5 w-5 accent-[#0b6b5c]"
                 type="checkbox"

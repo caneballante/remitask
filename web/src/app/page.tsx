@@ -1,5 +1,9 @@
-import { RemiTaskApp } from "@/components/remitask-app";
+import { RemiTaskApp, RemiTaskErrorBoundary } from "@/components/remitask-app";
 
 export default function Home() {
-  return <RemiTaskApp />;
+  return (
+    <RemiTaskErrorBoundary>
+      <RemiTaskApp />
+    </RemiTaskErrorBoundary>
+  );
 }

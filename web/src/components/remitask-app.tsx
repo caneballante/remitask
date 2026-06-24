@@ -2,8 +2,11 @@
 
 import {
   ChangeEvent,
+  Component,
+  ErrorInfo,
   FormEvent,
   Fragment,
+  ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -43,6 +46,41 @@ type SessionState = {
   authenticated: boolean;
   authRequired: boolean;
 };
+
+type ErrorBoundaryState = {
+  error: Error | null;
+};
+
+export class RemiTaskErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("RemiTask client error", error, errorInfo);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f5f7f6] px-4 text-[#17201c]">
+        <section className="max-w-xl rounded-lg border border-[#d9e1dd] bg-white p-6 shadow-sm">
+          <p className="text-xs font-bold uppercase text-[#9f2b2b]">RemiTask could not render</p>
+          <h1 className="mt-2 text-xl font-semibold">The data loaded, but the app hit a browser-side error.</h1>
+          <p className="mt-3 text-sm leading-6 text-[#53635c]">
+            Refresh once. If this keeps happening, send this message back so we can pin down the exact browser issue.
+          </p>
+          <pre className="mt-4 max-h-56 overflow-auto rounded-md bg-[#f7f9f8] p-3 text-xs text-[#17201c]">
+            {this.state.error.name}: {this.state.error.message}
+          </pre>
+        </section>
+      </main>
+    );
+  }
+}
 
 export function RemiTaskApp() {
   const [session, setSession] = useState<SessionState>({
@@ -351,7 +389,7 @@ export function RemiTaskApp() {
     const newTasks: Task[] = suggestions
       .filter((suggestion) => suggestion.selected && suggestion.title.trim())
       .map((suggestion) => ({
-        id: crypto.randomUUID(),
+        id: createId(),
         title: suggestion.title.trim(),
         project: suggestion.project,
         status: suggestion.status,
@@ -1625,7 +1663,7 @@ function normalizeLoadedState(raw: unknown): AppState {
 function normalizeMeeting(raw: Partial<Meeting>): Meeting {
   const now = new Date().toISOString();
   return {
-    id: cleanText(raw.id) || crypto.randomUUID(),
+    id: cleanText(raw.id) || createId(),
     calendarUid: cleanText(raw.calendarUid),
     title: cleanText(raw.title) || "Untitled meeting",
     project: cleanText(raw.project),
@@ -1643,7 +1681,7 @@ function normalizeMeeting(raw: Partial<Meeting>): Meeting {
 function normalizeTask(raw: Partial<Task>): Task {
   const now = new Date().toISOString();
   return {
-    id: cleanText(raw.id) || crypto.randomUUID(),
+    id: cleanText(raw.id) || createId(),
     title: cleanText(raw.title),
     project: cleanText(raw.project) || "Inbox",
     status: pickValue(raw.status, TASK_STATUSES, "Inbox"),
@@ -1663,7 +1701,7 @@ function normalizeTask(raw: Partial<Task>): Task {
 function blankMeeting(date: string): Meeting {
   const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     calendarUid: "",
     title: "",
     project: "",
@@ -1680,7 +1718,7 @@ function blankMeeting(date: string): Meeting {
 
 function blankTask(project: string): Task {
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     title: "",
     project,
     status: "Next",
@@ -1779,7 +1817,7 @@ function parseIcsEvent(eventText: string): Meeting | null {
     props[key] = [...(props[key] || []), { value, params }];
   });
 
-  const uid = firstIcsValue(props, "UID") || crypto.randomUUID();
+  const uid = firstIcsValue(props, "UID") || createId();
   const start = parseIcsDateTime(props.DTSTART?.[0]);
   const end = parseIcsDateTime(props.DTEND?.[0]);
   if (!start.date) return null;
@@ -1981,15 +2019,26 @@ function meetingDateTime(meeting: Meeting) {
 
 function formatDate(dateString: string) {
   if (!dateString) return "No date";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(`${dateString}T12:00:00`));
+  const date = safeDate(`${dateString}T12:00:00`);
+  if (!date) return dateString;
+  try {
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+  } catch {
+    return dateString;
+  }
 }
 
 function formatTime(timeString: string) {
   if (!timeString) return "";
   const [hour, minute] = timeString.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return timeString;
   const date = new Date();
   date.setHours(hour, minute, 0, 0);
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  try {
+    return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  } catch {
+    return timeString;
+  }
 }
 
 function todayIso() {
@@ -2004,7 +2053,7 @@ function localDateIso(date: Date) {
 }
 
 function slugify(value: string) {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || crypto.randomUUID();
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || createId();
 }
 
 function normalizeText(text: string) {
@@ -2026,4 +2075,16 @@ function readFileText(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsText(file);
   });
+}
+
+function safeDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function createId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

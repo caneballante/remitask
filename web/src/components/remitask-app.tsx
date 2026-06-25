@@ -30,6 +30,11 @@ const TASK_PRIORITIES: TaskPriority[] = ["P1", "P2", "P3"];
 const TASK_EFFORTS: TaskEffort[] = ["Quick", "Medium", "Deep"];
 const TASK_ENERGIES: TaskEnergy[] = ["Low-focus", "Normal", "High-focus"];
 const TASK_CONTEXTS: TaskContext[] = ["Email", "Meeting", "Writing", "Website", "Design", "Follow-up", "Admin"];
+const MEETING_DAY_TONES = [
+  "border-[#d7e4de] bg-[#fbfcfc]",
+  "border-[#d7ddeb] bg-[#f7f9fd]",
+  "border-[#e3ddcf] bg-[#fffaf1]",
+];
 
 const EMPTY_STATE: AppState = {
   meetings: [],
@@ -416,7 +421,6 @@ export function RemiTaskApp() {
 
   function openTaskEditor(task?: Task) {
     setTaskDraft(task ? { ...task } : blankTask(projects[0] || "Inbox"));
-    setActiveTab("tasks");
   }
 
   function saveTaskDraft() {
@@ -1011,6 +1015,8 @@ function MeetingList({
   onDeleteMeeting: (id: string) => void;
 }) {
   if (!meetings.length) return <EmptyState text={emptyText} />;
+  const dayToneByDate = meetingDayToneMap(meetings);
+
   return (
     <div className="grid gap-3">
       {meetings.map((meeting) => {
@@ -1018,8 +1024,15 @@ function MeetingList({
         const hasMoreNotes = meeting.notes && (meeting.notes.length > 420 || meeting.notes.split(/\r?\n/).length > 4);
         const details = [meeting.project, meeting.location, meeting.attendees ? `With ${meeting.attendees}` : ""].filter(Boolean).join(" / ");
         const time = meeting.start ? `${formatTime(meeting.start)}${meeting.end ? `-${formatTime(meeting.end)}` : ""}` : "Any time";
+        const dayToneClass = MEETING_DAY_TONES[dayToneByDate.get(meeting.date) || 0];
         return (
-          <article key={meeting.id} className="grid min-w-0 gap-3 rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-4 md:grid-cols-[7.5rem_minmax(0,1fr)_auto]">
+          <article
+            key={meeting.id}
+            className={[
+              "grid min-w-0 gap-3 rounded-lg border p-4 md:grid-cols-[7.5rem_minmax(0,1fr)_auto]",
+              dayToneClass,
+            ].join(" ")}
+          >
             <div className="text-sm font-bold text-[#235d91]">
               <span className="block">{time}</span>
               <span className="block text-[#53635c]">{formatDate(meeting.date)}</span>
@@ -1937,6 +1950,14 @@ function groupTasksByProject(tasks: Task[]) {
 
 function meetingMap(meetings: Meeting[]) {
   return new Map(meetings.map((meeting) => [meeting.id, meeting]));
+}
+
+function meetingDayToneMap(meetings: Meeting[]) {
+  const dates = new Map<string, number>();
+  meetings.forEach((meeting) => {
+    if (!dates.has(meeting.date)) dates.set(meeting.date, dates.size % MEETING_DAY_TONES.length);
+  });
+  return dates;
 }
 
 function sortTasksForDisplay(left: Task, right: Task) {

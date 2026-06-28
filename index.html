@@ -12,11 +12,14 @@
         <p class="eyebrow">Partnership Work</p>
         <h1>Task Dashboard</h1>
       </div>
-      <div class="header-actions">
-        <button class="ghost-button" id="exportButton" type="button">Export</button>
-        <label class="ghost-button file-button" for="importFile">Import</label>
-        <input id="importFile" type="file" accept="application/json">
-      </div>
+      <details class="admin-tools">
+        <summary>Admin</summary>
+        <div class="header-actions">
+          <button class="ghost-button" id="exportButton" type="button">Export JSON</button>
+          <label class="ghost-button file-button" for="importFile">Import JSON</label>
+          <input id="importFile" type="file" accept="application/json">
+        </div>
+      </details>
     </header>
 
     <nav class="workspace-tabs" aria-label="Workspace sections">

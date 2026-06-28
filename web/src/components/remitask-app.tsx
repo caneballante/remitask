@@ -620,10 +620,6 @@ export function RemiTaskApp() {
               New task
             </button>
             <FileButton label="Import ICS" accept=".ics,text/calendar" onChange={importIcs} />
-            <FileButton label="Import JSON" accept="application/json,.json" onChange={importJson} />
-            <button className="secondary-button" type="button" onClick={exportData}>
-              Export JSON
-            </button>
             {session.authRequired ? (
               <button className="ghost-button" type="button" onClick={handleLogout}>
                 Sign out
@@ -637,6 +633,15 @@ export function RemiTaskApp() {
           {icsStatus ? <span className="text-[#53635c]">{icsStatus}</span> : null}
           {importStatus ? <span className="text-[#53635c]">{importStatus}</span> : null}
         </div>
+        <details className="mt-4 rounded-md border border-[#d9e1dd] bg-[#fbfcfc] p-3 text-sm text-[#53635c]">
+          <summary className="cursor-pointer font-bold text-[#17201c]">Admin</summary>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <FileButton label="Import JSON" accept="application/json,.json" onChange={importJson} />
+            <button className="secondary-button" type="button" onClick={exportData}>
+              Export JSON
+            </button>
+          </div>
+        </details>
       </header>
 
       <nav className="flex gap-2 overflow-x-auto border-b border-[#d9e1dd] bg-white px-3 py-3 sm:px-6 lg:px-8">

@@ -79,6 +79,27 @@ button {
   gap: 10px;
 }
 
+.admin-tools {
+  min-width: min(100%, 250px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 10px;
+}
+
+.admin-tools summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.admin-tools .header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .compact-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -770,6 +791,15 @@ dialog::backdrop {
 
   .header-actions {
     width: 100%;
+  }
+
+  .admin-tools {
+    width: 100%;
+  }
+
+  .admin-tools .header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .compact-actions {

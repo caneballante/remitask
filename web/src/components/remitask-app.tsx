@@ -596,18 +596,18 @@ export function RemiTaskApp() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7f6] text-[#17201c]">
-      <header className="border-b border-[#d9e1dd] bg-white px-4 py-5 sm:px-6 lg:px-8">
+    <main className="min-h-screen overflow-x-hidden bg-[#f5f7f6] text-[#17201c]">
+      <header className="border-b border-[#d9e1dd] bg-white px-3 py-5 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase text-[#235d91]">Meeting notes / task tracking</p>
             <h1 className="mt-1 text-3xl font-semibold leading-tight sm:text-4xl">RemiTask</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 rounded-md border border-[#cfd9d4] bg-[#f7f9f8] px-3 py-2 text-sm font-semibold text-[#53635c]">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
+            <label className="col-span-2 flex min-w-0 items-center gap-2 rounded-md border border-[#cfd9d4] bg-[#f7f9f8] px-3 py-2 text-sm font-semibold text-[#53635c] sm:col-span-1 sm:w-auto">
               Date
               <input
-                className="w-[9.5rem] bg-transparent text-[#17201c] outline-none"
+                className="min-w-0 flex-1 bg-transparent text-[#17201c] outline-none sm:w-[9.5rem] sm:flex-none"
                 type="date"
                 value={selectedDate}
                 onChange={(event) => setSelectedDate(event.target.value || todayIso())}
@@ -639,7 +639,7 @@ export function RemiTaskApp() {
         </div>
       </header>
 
-      <nav className="flex gap-2 border-b border-[#d9e1dd] bg-white px-4 py-3 sm:px-6 lg:px-8">
+      <nav className="flex gap-2 overflow-x-auto border-b border-[#d9e1dd] bg-white px-3 py-3 sm:px-6 lg:px-8">
         {[
           ["dashboard", "Dashboard"],
           ["meetings", "Meetings"],
@@ -656,7 +656,7 @@ export function RemiTaskApp() {
         ))}
       </nav>
 
-      <section className="px-4 py-5 sm:px-6 lg:px-8">
+      <section className="px-3 py-4 sm:px-6 sm:py-5 lg:px-8">
         {activeTab === "dashboard" ? (
           <DashboardView
             summaryItems={summaryItems}
@@ -784,7 +784,7 @@ function DashboardView({
 }) {
   return (
     <div className="grid gap-4">
-      <section className="grid gap-3 sm:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {summaryItems.map(([label, count]) => (
           <div key={String(label)} className="rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-sm">
             <strong className="block text-2xl">{count}</strong>
@@ -853,12 +853,12 @@ function MeetingsView({
 }) {
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="min-w-0">
           <h2 className="text-xl font-semibold">Meetings</h2>
           <p className="mt-1 text-sm text-[#53635c]">Notes stay visible here, and calendar imports preserve any notes you add manually.</p>
         </div>
-        <button className="primary-button" type="button" onClick={onNewMeeting}>
+        <button className="primary-button w-full sm:w-auto" type="button" onClick={onNewMeeting}>
           New meeting
         </button>
       </div>
@@ -922,8 +922,8 @@ function TasksView({
 
   return (
     <div className="grid gap-4">
-      <section className="flex flex-col gap-3 rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">
+      <section className="flex min-w-0 flex-col gap-3 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
           {[
             ["today", "Today"],
             ["next", "Next"],
@@ -941,7 +941,7 @@ function TasksView({
             </button>
           ))}
         </div>
-        <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)]">
+        <div className="grid w-full min-w-0 gap-2 sm:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)] lg:max-w-xl">
           <input
             className="field"
             type="search"
@@ -1051,7 +1051,7 @@ function MeetingList({
                 </button>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-start gap-2 md:justify-end">
+            <div className="grid grid-cols-3 gap-2 md:flex md:flex-wrap md:items-start md:justify-end">
               <button className="secondary-button" type="button" onClick={() => onEditMeeting(meeting)}>
                 Edit
               </button>
@@ -1112,7 +1112,7 @@ function TaskList({
                   <h3 className={task.status === "Done" ? "font-semibold leading-snug line-through" : "font-semibold leading-snug"}>{task.title}</h3>
                   {task.notes ? <p className="mt-1 text-sm text-[#53635c]">{task.notes}</p> : null}
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap md:shrink-0 md:justify-end">
                   <button className="secondary-button" type="button" onClick={() => onEditTask(task)}>
                     Edit
                   </button>
@@ -1229,11 +1229,11 @@ function MeetingEditor({
           onAdd={onAddSuggestions}
         />
       ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button className="danger-button" type="button" onClick={onDelete}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
         </button>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
           <button className="secondary-button" type="button" onClick={onExtract}>
             Extract tasks
           </button>
@@ -1304,11 +1304,11 @@ function TaskEditor({
           onChange={(event) => onChange({ notes: event.target.value })}
         />
       </label>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button className="danger-button" type="button" onClick={onDelete}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
         </button>
-        <button className="primary-button" type="submit">
+        <button className="primary-button w-full sm:w-auto" type="submit">
           Save task
         </button>
       </div>
@@ -1334,20 +1334,20 @@ function SuggestionPanel({
   onAdd: () => void;
 }) {
   return (
-    <section className="rounded-lg border border-[#bfd5cf] bg-[#f2faf7] p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="rounded-lg border border-[#bfd5cf] bg-[#f2faf7] p-3 sm:p-4">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div className="min-w-0">
           <h3 className="font-semibold">Task suggestions</h3>
           <p className="text-sm text-[#53635c]">From {meeting.title}</p>
         </div>
-        <button className="primary-button" type="button" onClick={onAdd} disabled={!suggestions.some((suggestion) => suggestion.selected)}>
+        <button className="primary-button w-full sm:w-auto" type="button" onClick={onAdd} disabled={!suggestions.some((suggestion) => suggestion.selected)}>
           Add selected
         </button>
       </div>
       {suggestions.length ? (
         <div className="mt-3 grid gap-2">
           {suggestions.map((suggestion, index) => (
-            <div key={`suggestion-${index}`} className="grid gap-2 rounded-md border border-[#d9e1dd] bg-white p-3 lg:grid-cols-[auto_minmax(220px,1fr)_minmax(160px,220px)_6rem]">
+            <div key={`suggestion-${index}`} className="grid gap-2 rounded-md border border-[#d9e1dd] bg-white p-3 sm:grid-cols-[auto_minmax(180px,1fr)_minmax(150px,220px)_5.5rem]">
               <input
                 className="mt-2 h-5 w-5 accent-[#0b6b5c]"
                 type="checkbox"
@@ -1445,7 +1445,7 @@ function InlineNoteText({ text }: { text: string }) {
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="min-w-0 rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-sm">
+    <section className="min-w-0 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4">
       <h2 className="mb-4 text-lg font-semibold">{title}</h2>
       {children}
     </section>
@@ -1454,15 +1454,15 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/35 px-4 py-6">
-      <section className="mx-auto max-w-5xl rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-xl sm:p-5">
-        <div className="mb-4 flex items-start justify-between gap-4">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/35 px-2 py-3 sm:px-4 sm:py-6">
+      <section className="mx-auto flex max-h-[calc(100dvh-1.5rem)] max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d9e1dd] bg-white shadow-xl sm:max-h-[calc(100dvh-3rem)]">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[#d9e1dd] p-4 sm:p-5">
           <h2 className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
           <button className="ghost-button" type="button" onClick={onClose} aria-label="Close">
             Close
           </button>
         </div>
-        {children}
+        <div className="min-h-0 overflow-y-auto p-4 sm:p-5">{children}</div>
       </section>
     </div>
   );
@@ -1565,7 +1565,7 @@ function Tag({ children, tone = "gray" }: { children: React.ReactNode; tone?: "g
     blue: "border-[#c5d9ee] bg-[#e1effb] text-[#235d91]",
     amber: "border-[#ead294] bg-[#fff0ce] text-[#7a4d00]",
   }[tone];
-  return <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${toneClass}`}>{children}</span>;
+  return <span className={`max-w-full rounded-full border px-2.5 py-1 text-xs font-bold [overflow-wrap:anywhere] ${toneClass}`}>{children}</span>;
 }
 
 function StatusDot({ label, tone }: { label: string; tone: "good" | "wait" | "bad" }) {

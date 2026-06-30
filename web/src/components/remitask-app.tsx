@@ -204,8 +204,7 @@ export function RemiTaskApp() {
       const next = normalizeLoadedState(updater(appStateRef.current));
       appStateRef.current = next;
       setAppState(next);
-      void persistState(next);
-      return next;
+      return persistState(next);
     },
     [persistState],
   );
@@ -490,12 +489,20 @@ export function RemiTaskApp() {
     try {
       const text = await readFileText(file);
       const importedState = normalizeLoadedState(JSON.parse(text));
+      const previousState = appStateRef.current;
       appStateRef.current = importedState;
       setAppState(importedState);
-      void persistState(importedState);
-      setImportStatus(`Imported ${importedState.meetings.length} meetings and ${importedState.tasks.length} tasks.`);
-    } catch {
-      setImportStatus("That JSON file could not be imported.");
+      try {
+        await persistState(importedState);
+        setImportStatus(`Imported ${importedState.meetings.length} meetings and ${importedState.tasks.length} tasks.`);
+      } catch (error) {
+        appStateRef.current = previousState;
+        setAppState(previousState);
+        throw error;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "That JSON file could not be imported.";
+      setImportStatus(message);
     } finally {
       event.target.value = "";
     }
@@ -512,29 +519,38 @@ export function RemiTaskApp() {
         return;
       }
 
-      commitState((current) => {
-        const byKey = new Map<string, Meeting>();
-        current.meetings.forEach((meeting) => {
-          byKey.set(meeting.calendarUid || meeting.id, meeting);
-        });
-        imported.forEach((meeting) => {
-          const key = meeting.calendarUid || meeting.id;
-          const existing = byKey.get(key);
-          byKey.set(key, {
-            ...existing,
-            ...meeting,
-            id: existing?.id || meeting.id,
-            notes: existing?.notes || "",
-            createdAt: existing?.createdAt || meeting.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+      const previousState = appStateRef.current;
+      setIcsStatus(`Saving ${imported.length} calendar meeting${imported.length === 1 ? "" : "s"}...`);
+      try {
+        await commitState((current) => {
+          const byKey = new Map<string, Meeting>();
+          current.meetings.forEach((meeting) => {
+            byKey.set(importedMeetingKey(meeting), meeting);
           });
+          imported.forEach((meeting) => {
+            const key = importedMeetingKey(meeting);
+            const existing = byKey.get(key);
+            byKey.set(key, {
+              ...existing,
+              ...meeting,
+              id: existing?.id || meeting.id,
+              notes: existing?.notes || "",
+              createdAt: existing?.createdAt || meeting.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+          });
+          return { ...current, meetings: [...byKey.values()] };
         });
-        return { ...current, meetings: [...byKey.values()] };
-      });
+      } catch (error) {
+        appStateRef.current = previousState;
+        setAppState(previousState);
+        throw error;
+      }
       setActiveTab("meetings");
-      setIcsStatus(`Imported ${imported.length} calendar meeting${imported.length === 1 ? "" : "s"}.`);
-    } catch {
-      setIcsStatus("That .ics file could not be imported.");
+      setIcsStatus(`Imported and saved ${imported.length} calendar meeting${imported.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "That .ics file could not be imported.";
+      setIcsStatus(message);
     } finally {
       event.target.value = "";
     }
@@ -1839,10 +1855,11 @@ function parseIcsEvent(eventText: string): Meeting | null {
   const start = parseIcsDateTime(props.DTSTART?.[0]);
   const end = parseIcsDateTime(props.DTEND?.[0]);
   if (!start.date) return null;
+  const instanceUid = calendarInstanceUid(uid, start.date, start.time);
 
   return {
-    id: `ics-${slugify(uid)}`,
-    calendarUid: uid,
+    id: `ics-${slugify(instanceUid)}`,
+    calendarUid: instanceUid,
     title: firstIcsValue(props, "SUMMARY") || "Imported calendar event",
     project: "",
     date: start.date,
@@ -1895,6 +1912,17 @@ function unfoldIcs(text: string) {
 
 function firstIcsValue(props: Record<string, IcsProperty[]>, key: string) {
   return props[key]?.[0]?.value || "";
+}
+
+function importedMeetingKey(meeting: Meeting) {
+  const calendarUid = cleanText(meeting.calendarUid);
+  if (!calendarUid) return meeting.id;
+  if (calendarUid.includes("::")) return calendarUid;
+  return calendarInstanceUid(calendarUid, meeting.date, meeting.start);
+}
+
+function calendarInstanceUid(uid: string, date: string, start: string) {
+  return [uid, dateOnly(date) || "no-date", cleanText(start) || "all-day"].join("::");
 }
 
 function decodeIcsText(value: string) {

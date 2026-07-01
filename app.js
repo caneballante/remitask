@@ -487,7 +487,7 @@ const importedDocTasks = [
   }
 ];
 
-let state = { tasks: [], meetings: [], notes: [], imports: [] };
+let state = { tasks: [], meetings: [], notes: [], topics: [], imports: [] };
 let activeSection = "dashboard";
 let activeView = "today";
 let activeMeetingId = "";
@@ -495,6 +495,7 @@ let suggestions = [];
 let suggestionEmptyText = "No suggestions yet.";
 let serverSaveQueue = Promise.resolve();
 const expandedMeetingNotes = new Set();
+const expandedTopicNotes = new Set();
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -503,6 +504,7 @@ const elements = {
   agendaDate: $("#agendaDate"),
   todayMeetings: $("#todayMeetings"),
   todayTaskBoard: $("#todayTaskBoard"),
+  todayTopics: $("#todayTopics"),
   meetingId: $("#meetingId"),
   meetingTitle: $("#meetingTitle"),
   meetingProject: $("#meetingProject"),
@@ -529,6 +531,7 @@ const elements = {
   newMeetingButton: $("#newMeetingButton"),
   newMeetingButtonMeetings: $("#newMeetingButtonMeetings"),
   newMeetingButtonList: $("#newMeetingButtonList"),
+  newTopicButton: $("#newTopicButton"),
   newTaskButton: $("#newTaskButton"),
   newTaskButtonTasks: $("#newTaskButtonTasks"),
   taskBoard: $("#taskBoard"),
@@ -569,6 +572,17 @@ const elements = {
   deleteTaskButton: $("#deleteTaskButton"),
   cancelTaskButton: $("#cancelTaskButton"),
   closeDialogButton: $("#closeDialogButton"),
+  topicDialog: $("#topicDialog"),
+  topicForm: $("#topicForm"),
+  topicDialogTitle: $("#topicDialogTitle"),
+  topicId: $("#topicId"),
+  topicTitle: $("#topicTitle"),
+  topicProject: $("#topicProject"),
+  topicNotes: $("#topicNotes"),
+  topicNotesPreview: $("#topicNotesPreview"),
+  deleteTopicButton: $("#deleteTopicButton"),
+  cancelTopicButton: $("#cancelTopicButton"),
+  closeTopicDialogButton: $("#closeTopicDialogButton"),
   exportButton: $("#exportButton"),
   importFile: $("#importFile"),
   icsFile: $("#icsFile"),
@@ -581,6 +595,7 @@ async function loadState() {
   const base = remote || (stored ? JSON.parse(stored) : {
     tasks: seedTasks.map((task) => ({ ...task, id: crypto.randomUUID(), createdAt: new Date().toISOString() })),
     notes: [],
+    topics: [],
     imports: []
   });
 
@@ -602,6 +617,7 @@ async function loadState() {
     tasks: base.tasks || [],
     meetings: [...migratedMeetings, ...noteMeetings],
     notes: [],
+    topics: Array.isArray(base.topics) ? base.topics : [],
     imports: Array.isArray(base.imports) ? base.imports : []
   };
 
@@ -679,6 +695,10 @@ function cleanupVerificationData(nextState) {
   });
   nextState.tasks = nextState.tasks.filter((task) => {
     const text = `${task.title} ${task.project} ${task.notes}`.toLowerCase();
+    return !text.includes("test project") && !text.includes("test meeting");
+  });
+  nextState.topics = (nextState.topics || []).filter((topic) => {
+    const text = `${topic.title} ${topic.project} ${topic.notes}`.toLowerCase();
     return !text.includes("test project") && !text.includes("test meeting");
   });
   nextState.imports = [...nextState.imports, verificationCleanupVersion];
@@ -1047,7 +1067,8 @@ function addSelectedSuggestions() {
 function getProjects() {
   return [...new Set([
     ...state.tasks.map((task) => task.project),
-    ...state.meetings.map((meeting) => meeting.project)
+    ...state.meetings.map((meeting) => meeting.project),
+    ...(state.topics || []).map((topic) => topic.project)
   ].filter(Boolean))].sort();
 }
 
@@ -1072,6 +1093,7 @@ function renderSummary() {
   const selectedDate = elements.agendaDate.value || todayIso();
   const summary = [
     ["Meetings", state.meetings.filter((meeting) => meeting.date === selectedDate).length],
+    ["Topics", (state.topics || []).length],
     ["Today", state.tasks.filter((task) => task.status === "Today").length],
     ["P1", active.filter((task) => task.priority === "P1").length],
     ["Quick", active.filter((task) => task.effort === "Quick").length],
@@ -1134,6 +1156,50 @@ function meetingCard(meeting) {
       <button type="button" data-edit-meeting="${meeting.id}">Edit</button>
       <button type="button" data-process-meeting="${meeting.id}">Extract</button>
       <button class="delete-meeting-action" type="button" data-delete-meeting="${meeting.id}">Delete</button>
+    </div>
+  `;
+  return card;
+}
+
+function allTopics() {
+  return [...(state.topics || [])].sort((a, b) => {
+    return (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
+  });
+}
+
+function renderDashboardTopics() {
+  renderTopicCollection(elements.todayTopics, allTopics(), "No topics yet.");
+}
+
+function renderTopicCollection(container, topics, emptyText) {
+  container.innerHTML = "";
+  if (!topics.length) {
+    container.innerHTML = `<div class="empty-state">${emptyText}</div>`;
+    return;
+  }
+  topics.forEach((topic) => container.appendChild(topicCard(topic)));
+}
+
+function topicCard(topic) {
+  const card = document.createElement("article");
+  card.className = "topic-card";
+  const notesExpanded = expandedTopicNotes.has(topic.id);
+  const hasMoreNotes = topic.notes && (topic.notes.split(/\r?\n/).length > 4 || topic.notes.length > 420);
+  const updated = topic.updatedAt || topic.createdAt;
+  card.innerHTML = `
+    <div class="topic-main">
+      <h3>${escapeHtml(topic.title || "Untitled topic")}</h3>
+      <div class="task-tags">
+        <span class="tag">${escapeHtml(topic.project || "Inbox")}</span>
+        ${updated ? `<span class="tag">Updated ${escapeHtml(formatDate(updated.slice(0, 10)))}</span>` : ""}
+      </div>
+      ${topic.notes ? `<div class="note-preview ${notesExpanded ? "" : "compact"}">${renderNotePreview(topic.notes, { maxLines: notesExpanded ? Infinity : 4 })}</div>` : ""}
+      ${hasMoreNotes ? `<button class="note-expand-button" type="button" data-toggle-topic-notes="${topic.id}">${notesExpanded ? "Less notes" : "More notes"}</button>` : ""}
+    </div>
+    <div class="topic-actions">
+      <button type="button" data-edit-topic="${topic.id}">Edit</button>
+      <button type="button" data-topic-task="${topic.id}">Make Task</button>
+      <button class="delete-topic-action" type="button" data-delete-topic="${topic.id}">Delete</button>
     </div>
   `;
   return card;
@@ -1241,8 +1307,8 @@ function taskCard(task) {
   return card;
 }
 
-function openTaskDialog(task = null) {
-  const isNew = !task;
+function openTaskDialog(task = null, { forceNew = false } = {}) {
+  const isNew = forceNew || !task;
   const data = task || {
     id: "",
     title: "",
@@ -1315,6 +1381,78 @@ function deleteTask() {
   renderAll();
 }
 
+function openTopicDialog(topic = null) {
+  const isNew = !topic;
+  const data = topic || {
+    id: "",
+    title: "",
+    project: elements.meetingProject.value.trim() || "Inbox",
+    notes: ""
+  };
+
+  elements.topicDialogTitle.textContent = isNew ? "New Topic" : "Edit Topic";
+  elements.topicId.value = data.id;
+  elements.topicTitle.value = data.title || "";
+  elements.topicProject.value = data.project || "Inbox";
+  elements.topicNotes.value = data.notes || "";
+  elements.deleteTopicButton.hidden = isNew;
+  updateTopicDialogPreview();
+  elements.topicDialog.showModal();
+  elements.topicTitle.focus();
+}
+
+function saveTopicFromDialog() {
+  const id = elements.topicId.value || crypto.randomUUID();
+  const existing = (state.topics || []).find((item) => item.id === id);
+  const now = new Date().toISOString();
+  const topic = {
+    id,
+    title: elements.topicTitle.value.trim(),
+    project: elements.topicProject.value.trim() || "Inbox",
+    notes: elements.topicNotes.value.trim(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+
+  state.topics = existing
+    ? state.topics.map((item) => item.id === id ? topic : item)
+    : [topic, ...(state.topics || [])];
+  saveState();
+  elements.topicDialog.close();
+  renderAll();
+}
+
+function deleteTopic() {
+  const id = elements.topicId.value;
+  const topic = (state.topics || []).find((item) => item.id === id);
+  if (!topic) return;
+  if (!confirm(`Delete "${topic.title || "this topic"}"?`)) return;
+  state.topics = state.topics.filter((item) => item.id !== id);
+  expandedTopicNotes.delete(id);
+  saveState();
+  elements.topicDialog.close();
+  renderAll();
+}
+
+function makeTaskFromTopic(id) {
+  const topic = (state.topics || []).find((item) => item.id === id);
+  if (!topic) return;
+  openTaskDialog({
+    id: "",
+    title: topic.title || "",
+    project: topic.project || "Inbox",
+    status: "Next",
+    priority: "P2",
+    effort: "Quick",
+    energy: "Normal",
+    context: "Follow-up",
+    owner: "Jon",
+    due: "",
+    notes: topic.notes || "",
+    meetingId: ""
+  }, { forceNew: true });
+}
+
 function exportData() {
   const data = JSON.stringify(state, null, 2);
   const blob = new Blob([data], { type: "application/json" });
@@ -1332,6 +1470,7 @@ function importData(file) {
     state = JSON.parse(reader.result);
     if (!Array.isArray(state.meetings)) state.meetings = [];
     if (!Array.isArray(state.tasks)) state.tasks = [];
+    if (!Array.isArray(state.topics)) state.topics = [];
     saveState();
     clearMeetingForm();
     renderAll();
@@ -1350,12 +1489,13 @@ function importIcsFile(file) {
 
     const meetingsByKey = new Map();
     state.meetings.forEach((meeting) => {
-      meetingsByKey.set(meeting.calendarUid || meeting.id, meeting);
+      meetingsByKey.set(importedMeetingKey(meeting), meeting);
     });
 
     imported.forEach((meeting) => {
-      const existing = meetingsByKey.get(meeting.calendarUid);
-      meetingsByKey.set(meeting.calendarUid, {
+      const key = importedMeetingKey(meeting);
+      const existing = meetingsByKey.get(key);
+      meetingsByKey.set(key, {
         ...existing,
         ...meeting,
         id: existing?.id || meeting.id,
@@ -1425,10 +1565,11 @@ function parseIcsEvent(eventText) {
   const location = firstIcsValue(props, "LOCATION");
 
   if (!start.date) return null;
+  const instanceUid = calendarInstanceUid(uid, start.date, start.time);
 
   return {
-    id: `ics-${slugify(uid)}`,
-    calendarUid: uid,
+    id: `ics-${slugify(instanceUid)}`,
+    calendarUid: instanceUid,
     title,
     project: "",
     date: start.date,
@@ -1452,6 +1593,19 @@ function parseIcsParams(paramParts) {
 
 function firstIcsValue(props, key) {
   return props[key]?.[0]?.value || "";
+}
+
+function importedMeetingKey(meeting) {
+  const calendarUid = String(meeting.calendarUid || "").trim();
+  if (!calendarUid) return meeting.id;
+  if (calendarUid.includes("::")) return calendarUid;
+  return calendarInstanceUid(calendarUid, meeting.date, meeting.start);
+}
+
+function calendarInstanceUid(uid, date, start) {
+  const occurrenceDate = String(date || "").trim().slice(0, 10) || "no-date";
+  const occurrenceStart = String(start || "").trim() || "all-day";
+  return [uid, occurrenceDate, occurrenceStart].join("::");
 }
 
 function parseIcsDateTime(prop) {
@@ -1590,6 +1744,7 @@ function applyNoteTool(textarea, tool) {
   }
   updateMeetingFormPreview();
   updateMeetingDialogPreview();
+  updateTopicDialogPreview();
 }
 
 function wrapSelectedText(textarea, before, after, placeholder) {
@@ -1630,6 +1785,12 @@ function updateMeetingFormPreview() {
   elements.meetingNotesPreview.hidden = !elements.meetingNotes.value.trim();
 }
 
+function updateTopicDialogPreview() {
+  if (!elements.topicNotesPreview) return;
+  elements.topicNotesPreview.innerHTML = renderNotePreview(elements.topicNotes.value);
+  elements.topicNotesPreview.hidden = !elements.topicNotes.value.trim();
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -1655,6 +1816,7 @@ function renderAll() {
   renderSummary();
   renderDashboardMeetings();
   renderDashboardTasks();
+  renderDashboardTopics();
   renderMeetingList();
   renderSuggestions();
   renderTasks();
@@ -1683,6 +1845,7 @@ function startNewMeeting() {
 elements.newMeetingButton.addEventListener("click", startNewMeeting);
 elements.newMeetingButtonMeetings.addEventListener("click", startNewMeeting);
 elements.newMeetingButtonList.addEventListener("click", startNewMeeting);
+elements.newTopicButton.addEventListener("click", () => openTopicDialog());
 
 elements.saveMeetingButton.addEventListener("click", () => saveMeeting());
 elements.saveMeetingButtonInline.addEventListener("click", () => saveMeeting());
@@ -1696,6 +1859,7 @@ elements.agendaDate.addEventListener("change", () => {
 
 elements.meetingList.addEventListener("click", handleMeetingAction);
 elements.todayMeetings.addEventListener("click", handleMeetingAction);
+elements.todayTopics.addEventListener("click", handleTopicAction);
 
 elements.meetingDialogForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1708,6 +1872,15 @@ elements.cancelMeetingDialogButton.addEventListener("click", () => elements.meet
 elements.closeMeetingDialogButton.addEventListener("click", () => elements.meetingDialog.close());
 elements.meetingNotes.addEventListener("input", updateMeetingFormPreview);
 elements.dialogMeetingNotes.addEventListener("input", updateMeetingDialogPreview);
+elements.topicNotes.addEventListener("input", updateTopicDialogPreview);
+
+elements.topicForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveTopicFromDialog();
+});
+elements.deleteTopicButton.addEventListener("click", deleteTopic);
+elements.cancelTopicButton.addEventListener("click", () => elements.topicDialog.close());
+elements.closeTopicDialogButton.addEventListener("click", () => elements.topicDialog.close());
 
 function handleMeetingAction(event) {
   const toggleNotes = event.target.closest("[data-toggle-notes]");
@@ -1736,6 +1909,44 @@ function handleMeetingAction(event) {
     extractSuggestions();
   }
   if (remove) deleteMeetingById(remove.dataset.deleteMeeting);
+}
+
+function handleTopicAction(event) {
+  const toggleNotes = event.target.closest("[data-toggle-topic-notes]");
+  const edit = event.target.closest("[data-edit-topic]");
+  const makeTask = event.target.closest("[data-topic-task]");
+  const remove = event.target.closest("[data-delete-topic]");
+
+  if (toggleNotes) {
+    const id = toggleNotes.dataset.toggleTopicNotes;
+    if (expandedTopicNotes.has(id)) {
+      expandedTopicNotes.delete(id);
+    } else {
+      expandedTopicNotes.add(id);
+    }
+    renderAll();
+    return;
+  }
+
+  if (edit) {
+    openTopicDialog((state.topics || []).find((topic) => topic.id === edit.dataset.editTopic));
+    return;
+  }
+
+  if (makeTask) {
+    makeTaskFromTopic(makeTask.dataset.topicTask);
+    return;
+  }
+
+  if (remove) {
+    const topic = (state.topics || []).find((item) => item.id === remove.dataset.deleteTopic);
+    if (!topic) return;
+    if (!confirm(`Delete "${topic.title || "this topic"}"?`)) return;
+    state.topics = state.topics.filter((item) => item.id !== topic.id);
+    expandedTopicNotes.delete(topic.id);
+    saveState();
+    renderAll();
+  }
 }
 
 elements.addSuggestionButton.addEventListener("click", () => {

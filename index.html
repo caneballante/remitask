@@ -38,6 +38,7 @@
           <div class="header-actions compact-actions">
             <input id="agendaDate" type="date" aria-label="Agenda date">
             <button id="newMeetingButton" class="secondary-button" type="button">Add Meeting</button>
+            <button id="newTopicButton" class="secondary-button" type="button">Add Topic</button>
             <button id="newTaskButton" class="primary-button" type="button">New Task</button>
           </div>
         </div>
@@ -63,6 +64,16 @@
               </div>
             </div>
             <div id="todayTaskBoard" class="task-board"></div>
+          </section>
+
+          <section class="day-panel" aria-labelledby="topicsTitle">
+            <div class="section-heading compact-heading">
+              <div>
+                <p class="eyebrow">Watching</p>
+                <h2 id="topicsTitle">Topics</h2>
+              </div>
+            </div>
+            <div id="todayTopics" class="topic-list"></div>
           </section>
         </div>
       </section>
@@ -349,6 +360,49 @@
           <div>
             <button class="secondary-button" id="cancelTaskButton" type="button">Cancel</button>
             <button class="primary-button" id="saveTaskButton" type="submit">Save Task</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="topicDialog">
+      <form method="dialog" id="topicForm" class="task-form">
+        <div class="dialog-header">
+          <h2 id="topicDialogTitle">Edit Topic</h2>
+          <button class="icon-button" id="closeTopicDialogButton" type="button" aria-label="Close">Ã—</button>
+        </div>
+
+        <input id="topicId" type="hidden">
+        <label class="full-field">
+          Topic
+          <textarea id="topicTitle" rows="3" required></textarea>
+        </label>
+
+        <div class="form-grid">
+          <label>
+            Project
+            <input id="topicProject" type="text" list="projectOptions" required>
+          </label>
+        </div>
+
+        <label class="full-field">
+          Notes
+          <div class="note-toolbar" aria-label="Note formatting tools">
+            <button type="button" data-note-tool="bold" data-note-target="topicNotes">Bold</button>
+            <button type="button" data-note-tool="bullet" data-note-target="topicNotes">Bullet</button>
+            <button type="button" data-note-tool="task" data-note-target="topicNotes">Task</button>
+            <button type="button" data-note-tool="heading" data-note-target="topicNotes">Heading</button>
+            <button type="button" data-note-tool="divider" data-note-target="topicNotes">Divider</button>
+          </div>
+          <textarea id="topicNotes" rows="8"></textarea>
+        </label>
+        <div id="topicNotesPreview" class="note-preview note-preview-dialog" hidden></div>
+
+        <div class="dialog-actions">
+          <button id="deleteTopicButton" class="danger-button" type="button">Delete</button>
+          <div>
+            <button class="secondary-button" id="cancelTopicButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveTopicButton" type="submit">Save Topic</button>
           </div>
         </div>
       </form>

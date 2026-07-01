@@ -375,7 +375,7 @@ button:focus-visible {
 
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -437,11 +437,12 @@ button:focus-visible {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.1fr);
   gap: 18px;
 }
 
-.meeting-list {
+.meeting-list,
+.topic-list {
   display: grid;
   gap: 10px;
 }
@@ -607,6 +608,32 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.topic-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-left: 7px solid var(--blue);
+  border-radius: 8px;
+  background: #fff;
+  padding: 13px;
+}
+
+.topic-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.topic-main h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
 .task-card input[type="checkbox"] {
   margin-top: 4px;
   width: 22px;
@@ -655,14 +682,16 @@ button:focus-visible {
   color: var(--blue);
 }
 
-.task-actions {
+.task-actions,
+.topic-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
 }
 
-.task-actions button {
+.task-actions button,
+.topic-actions button {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
@@ -670,6 +699,12 @@ button:focus-visible {
   padding: 0 10px;
   color: var(--muted);
   font-weight: 700;
+}
+
+.topic-actions .delete-topic-action {
+  border-color: rgba(174, 42, 42, 0.2);
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 .empty-state {
@@ -761,7 +796,8 @@ dialog::backdrop {
     grid-column: 2;
   }
 
-  .task-card {
+  .task-card,
+  .topic-card {
     grid-template-columns: 32px 1fr;
   }
 
@@ -769,8 +805,17 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 
-  .task-actions {
+  .topic-card {
+    grid-template-columns: 1fr;
+  }
+
+  .task-actions,
+  .topic-actions {
     grid-column: 2;
+  }
+
+  .topic-actions {
+    grid-column: 1;
   }
 }
 
@@ -832,14 +877,16 @@ dialog::backdrop {
   }
 
   .meeting-actions,
-  .task-actions {
+  .task-actions,
+  .topic-actions {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     justify-content: stretch;
   }
 
   .meeting-actions button,
-  .task-actions button {
+  .task-actions button,
+  .topic-actions button {
     padding-inline: 8px;
   }
 

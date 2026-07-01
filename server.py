@@ -73,6 +73,17 @@ def init_db() -> None:
               data TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS topics (
+              id TEXT PRIMARY KEY,
+              position INTEGER NOT NULL,
+              title TEXT NOT NULL DEFAULT '',
+              project TEXT NOT NULL DEFAULT '',
+              notes TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT '',
+              data TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS imports (
               import_key TEXT PRIMARY KEY,
               position INTEGER NOT NULL
@@ -81,7 +92,7 @@ def init_db() -> None:
         )
 
         has_data = conn.execute(
-            "SELECT EXISTS(SELECT 1 FROM tasks) OR EXISTS(SELECT 1 FROM meetings)"
+            "SELECT EXISTS(SELECT 1 FROM tasks) OR EXISTS(SELECT 1 FROM meetings) OR EXISTS(SELECT 1 FROM topics)"
         ).fetchone()[0]
 
     if not has_data and BACKUP_PATH.exists():
@@ -103,8 +114,9 @@ def normalize_state(state: object) -> dict:
     tasks = [item for item in ensure_list(state.get("tasks")) if isinstance(item, dict)]
     meetings = [item for item in ensure_list(state.get("meetings")) if isinstance(item, dict)]
     notes = [item for item in ensure_list(state.get("notes")) if isinstance(item, dict)]
+    topics = [item for item in ensure_list(state.get("topics")) if isinstance(item, dict)]
     imports = [item for item in ensure_list(state.get("imports")) if isinstance(item, str)]
-    return {"tasks": tasks, "meetings": meetings, "notes": notes, "imports": imports}
+    return {"tasks": tasks, "meetings": meetings, "notes": notes, "topics": topics, "imports": imports}
 
 
 def load_env_file() -> None:
@@ -286,11 +298,15 @@ def load_state() -> dict:
             json.loads(row["data"])
             for row in conn.execute("SELECT data FROM notes ORDER BY position")
         ]
+        topics = [
+            json.loads(row["data"])
+            for row in conn.execute("SELECT data FROM topics ORDER BY position, updated_at DESC, created_at DESC, title")
+        ]
         imports = [
             row["import_key"]
             for row in conn.execute("SELECT import_key FROM imports ORDER BY position")
         ]
-    return {"tasks": tasks, "meetings": meetings, "notes": notes, "imports": imports}
+    return {"tasks": tasks, "meetings": meetings, "notes": notes, "topics": topics, "imports": imports}
 
 
 def save_state(raw_state: object) -> dict:
@@ -300,6 +316,7 @@ def save_state(raw_state: object) -> dict:
         conn.execute("DELETE FROM tasks")
         conn.execute("DELETE FROM meetings")
         conn.execute("DELETE FROM notes")
+        conn.execute("DELETE FROM topics")
         conn.execute("DELETE FROM imports")
 
         for position, task in enumerate(state["tasks"]):
@@ -367,6 +384,28 @@ def save_state(raw_state: object) -> dict:
             conn.execute(
                 "INSERT INTO notes (id, position, data) VALUES (?, ?, ?)",
                 (note_id, position, json.dumps(note, ensure_ascii=False)),
+            )
+
+        for position, topic in enumerate(state["topics"]):
+            topic_id = clean_text(topic.get("id"))
+            if not topic_id:
+                continue
+            conn.execute(
+                """
+                INSERT INTO topics (
+                  id, position, title, project, notes, created_at, updated_at, data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    topic_id,
+                    position,
+                    clean_text(topic.get("title")),
+                    clean_text(topic.get("project")),
+                    clean_text(topic.get("notes")),
+                    clean_text(topic.get("createdAt")),
+                    clean_text(topic.get("updatedAt")),
+                    json.dumps(topic, ensure_ascii=False),
+                ),
             )
 
         for position, import_key in enumerate(state["imports"]):

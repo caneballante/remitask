@@ -36,3 +36,15 @@ create table if not exists tasks (
 create index if not exists tasks_status_idx on tasks (status);
 create index if not exists tasks_due_idx on tasks (due);
 create index if not exists tasks_meeting_id_idx on tasks (meeting_id);
+
+create table if not exists topics (
+  id text primary key,
+  title text not null default '',
+  project text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists topics_project_idx on topics (project);
+create index if not exists topics_updated_at_idx on topics (updated_at);

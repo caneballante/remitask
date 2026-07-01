@@ -36,9 +36,19 @@ export type Task = {
   completedAt?: string;
 };
 
+export type Topic = {
+  id: string;
+  title: string;
+  project: string;
+  notes: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
 export type AppState = {
   tasks: Task[];
   meetings: Meeting[];
+  topics: Topic[];
   notes: unknown[];
   imports: string[];
 };

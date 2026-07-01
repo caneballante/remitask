@@ -1,5 +1,5 @@
 import { getSql } from "@/lib/db";
-import type { AppState, Meeting, Task } from "@/lib/types";
+import type { AppState, Meeting, Task, Topic } from "@/lib/types";
 
 type MeetingRow = {
   id: string;
@@ -33,10 +33,20 @@ type TaskRow = {
   completed_at: DateValue;
 };
 
+type TopicRow = {
+  id: string;
+  title: string;
+  project: string;
+  notes: string;
+  created_at: DateValue;
+  updated_at: DateValue;
+};
+
 type DateValue = string | Date | null;
 
 export async function loadState(): Promise<AppState> {
   const sql = getSql();
+  await ensureTopicsTable();
   const meetingRowsPromise = sql`
     select id, calendar_uid, title, project, date, start_time, end_time, location,
            attendees, notes, created_at, updated_at
@@ -49,14 +59,21 @@ export async function loadState(): Promise<AppState> {
     from tasks
     order by created_at desc
   ` as unknown as Promise<TaskRow[]>;
-  const [meetingRows, taskRows] = await Promise.all([
+  const topicRowsPromise = sql`
+    select id, title, project, notes, created_at, updated_at
+    from topics
+    order by updated_at desc, created_at desc, title
+  ` as unknown as Promise<TopicRow[]>;
+  const [meetingRows, taskRows, topicRows] = await Promise.all([
     meetingRowsPromise,
     taskRowsPromise,
+    topicRowsPromise,
   ]);
 
   return {
     meetings: meetingRows.map(meetingFromRow),
     tasks: taskRows.map(taskFromRow),
+    topics: topicRows.map(topicFromRow),
     notes: [],
     imports: [],
   };
@@ -64,10 +81,13 @@ export async function loadState(): Promise<AppState> {
 
 export async function saveState(state: AppState): Promise<AppState> {
   const sql = getSql();
+  await ensureTopicsTable();
   const meetings = Array.isArray(state.meetings) ? state.meetings : [];
   const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+  const topics = Array.isArray(state.topics) ? state.topics : [];
 
   await sql.transaction([
+    sql`delete from topics`,
     sql`delete from tasks`,
     sql`delete from meetings`,
     ...meetings.map((meeting) => sql`
@@ -110,6 +130,18 @@ export async function saveState(state: AppState): Promise<AppState> {
         ${task.completedAt || null}
       )
     `),
+    ...topics.map((topic) => sql`
+      insert into topics (
+        id, title, project, notes, created_at, updated_at
+      ) values (
+        ${topic.id},
+        ${topic.title || ""},
+        ${topic.project || ""},
+        ${topic.notes || ""},
+        ${topic.createdAt || new Date().toISOString()},
+        ${topic.updatedAt || new Date().toISOString()}
+      )
+    `),
   ]);
 
   return loadState();
@@ -149,6 +181,33 @@ function taskFromRow(row: TaskRow): Task {
     createdAt: toIso(row.created_at),
     completedAt: row.completed_at ? toIso(row.completed_at) : "",
   };
+}
+
+function topicFromRow(row: TopicRow): Topic {
+  return {
+    id: row.id,
+    title: row.title,
+    project: row.project,
+    notes: row.notes,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+async function ensureTopicsTable() {
+  const sql = getSql();
+  await sql`
+    create table if not exists topics (
+      id text primary key,
+      title text not null default '',
+      project text not null default '',
+      notes text not null default '',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists topics_project_idx on topics (project)`;
+  await sql`create index if not exists topics_updated_at_idx on topics (updated_at)`;
 }
 
 function toIso(value: DateValue) {

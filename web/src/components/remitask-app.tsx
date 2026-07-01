@@ -23,6 +23,7 @@ import type {
   TaskPriority,
   TaskStatus,
   TaskSuggestion,
+  Topic,
 } from "@/lib/types";
 
 const TASK_STATUSES: TaskStatus[] = ["Inbox", "Today", "Next", "Waiting", "Scheduled", "Done", "Someday"];
@@ -39,6 +40,7 @@ const MEETING_DAY_TONES = [
 const EMPTY_STATE: AppState = {
   meetings: [],
   tasks: [],
+  topics: [],
   notes: [],
   imports: [],
 };
@@ -106,7 +108,9 @@ export function RemiTaskApp() {
   const [projectFilter, setProjectFilter] = useState("");
   const [meetingDraft, setMeetingDraft] = useState<Meeting | null>(null);
   const [taskDraft, setTaskDraft] = useState<Task | null>(null);
+  const [topicDraft, setTopicDraft] = useState<Topic | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(() => new Set());
+  const [expandedTopicNotes, setExpandedTopicNotes] = useState<Set<string>>(() => new Set());
   const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([]);
   const [suggestionMeeting, setSuggestionMeeting] = useState<Meeting | null>(null);
   const [suggestionMessage, setSuggestionMessage] = useState("No suggestions yet.");
@@ -117,6 +121,7 @@ export function RemiTaskApp() {
   const saveQueueRef = useRef(Promise.resolve());
   const saveGenerationRef = useRef(0);
   const meetingNotesRef = useRef<HTMLTextAreaElement>(null);
+  const topicNotesRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     async function checkSession() {
@@ -212,12 +217,16 @@ export function RemiTaskApp() {
   const projects = useMemo(() => {
     return [
       ...new Set(
-        [...appState.meetings.map((meeting) => meeting.project), ...appState.tasks.map((task) => task.project)]
+        [
+          ...appState.meetings.map((meeting) => meeting.project),
+          ...appState.tasks.map((task) => task.project),
+          ...appState.topics.map((topic) => topic.project),
+        ]
           .map((project) => project.trim())
           .filter(Boolean),
       ),
     ].sort();
-  }, [appState.meetings, appState.tasks]);
+  }, [appState.meetings, appState.tasks, appState.topics]);
 
   const meetingsForSelectedDate = useMemo(() => {
     return appState.meetings
@@ -228,6 +237,10 @@ export function RemiTaskApp() {
   const allMeetings = useMemo(() => {
     return [...appState.meetings].sort((left, right) => meetingDateTime(right).localeCompare(meetingDateTime(left)));
   }, [appState.meetings]);
+
+  const allTopics = useMemo(() => {
+    return [...appState.topics].sort(sortTopicsForDisplay);
+  }, [appState.topics]);
 
   const dashboardTasks = useMemo(() => {
     return appState.tasks
@@ -258,12 +271,13 @@ export function RemiTaskApp() {
     const active = appState.tasks.filter((task) => task.status !== "Done");
     return [
       ["Meetings", meetingsForSelectedDate.length],
+      ["Topics", appState.topics.length],
       ["Today", appState.tasks.filter((task) => task.status === "Today").length],
       ["P1", active.filter((task) => task.priority === "P1").length],
       ["Quick", active.filter((task) => task.effort === "Quick").length],
       ["Waiting", appState.tasks.filter((task) => task.status === "Waiting").length],
     ];
-  }, [appState.tasks, meetingsForSelectedDate.length]);
+  }, [appState.tasks, appState.topics.length, meetingsForSelectedDate.length]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -422,6 +436,10 @@ export function RemiTaskApp() {
     setTaskDraft(task ? { ...task } : blankTask(projects[0] || "Inbox"));
   }
 
+  function openTopicEditor(topic?: Topic) {
+    setTopicDraft(topic ? { ...topic } : blankTopic(projects[0] || "Inbox"));
+  }
+
   function saveTaskDraft() {
     if (!taskDraft) return;
     const now = new Date().toISOString();
@@ -472,6 +490,53 @@ export function RemiTaskApp() {
     updateTask(task.id, { status: "Done", completedAt: new Date().toISOString() });
   }
 
+  function saveTopicDraft() {
+    if (!topicDraft) return;
+    const now = new Date().toISOString();
+    const existing = appStateRef.current.topics.find((topic) => topic.id === topicDraft.id);
+    const nextTopic: Topic = {
+      ...topicDraft,
+      title: topicDraft.title.trim(),
+      project: topicDraft.project.trim() || "Inbox",
+      notes: topicDraft.notes.trim(),
+      createdAt: existing?.createdAt || topicDraft.createdAt || now,
+      updatedAt: now,
+    };
+    if (!nextTopic.title) return;
+
+    commitState((current) => ({
+      ...current,
+      topics: current.topics.some((topic) => topic.id === nextTopic.id)
+        ? current.topics.map((topic) => (topic.id === nextTopic.id ? nextTopic : topic))
+        : [nextTopic, ...current.topics],
+    }));
+    setTopicDraft(null);
+  }
+
+  function deleteTopic(id: string) {
+    const topic = appStateRef.current.topics.find((item) => item.id === id);
+    if (!topic) return;
+    if (!confirm(`Delete "${topic.title || "this topic"}"?`)) return;
+    commitState((current) => ({
+      ...current,
+      topics: current.topics.filter((item) => item.id !== id),
+    }));
+    setExpandedTopicNotes((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setTopicDraft(null);
+  }
+
+  function makeTaskFromTopic(topic: Topic) {
+    setTaskDraft({
+      ...blankTask(topic.project || "Inbox"),
+      title: topic.title,
+      notes: topic.notes,
+    });
+  }
+
   function exportData() {
     const data = JSON.stringify(appStateRef.current, null, 2);
     const blob = new Blob([data], { type: "application/json" });
@@ -494,7 +559,7 @@ export function RemiTaskApp() {
       setAppState(importedState);
       try {
         await persistState(importedState);
-        setImportStatus(`Imported ${importedState.meetings.length} meetings and ${importedState.tasks.length} tasks.`);
+        setImportStatus(`Imported ${importedState.meetings.length} meetings, ${importedState.tasks.length} tasks, and ${importedState.topics.length} topics.`);
       } catch (error) {
         appStateRef.current = previousState;
         setAppState(previousState);
@@ -565,11 +630,31 @@ export function RemiTaskApp() {
     });
   }
 
+  function toggleTopicNotes(topicId: string) {
+    setExpandedTopicNotes((current) => {
+      const next = new Set(current);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+  }
+
   function applyNoteTool(tool: NoteTool) {
     if (!meetingDraft || !meetingNotesRef.current) return;
     const textarea = meetingNotesRef.current;
     const result = applyNoteToolToValue(textarea.value, textarea.selectionStart, textarea.selectionEnd, tool);
     setMeetingDraft({ ...meetingDraft, notes: result.value });
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
+  }
+
+  function applyTopicNoteTool(tool: NoteTool) {
+    if (!topicDraft || !topicNotesRef.current) return;
+    const textarea = topicNotesRef.current;
+    const result = applyNoteToolToValue(textarea.value, textarea.selectionStart, textarea.selectionEnd, tool);
+    setTopicDraft({ ...topicDraft, notes: result.value });
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
@@ -608,7 +693,7 @@ export function RemiTaskApp() {
   }
 
   if (isLoadingState) {
-    return <ShellMessage title="Loading RemiTask" body="Pulling your meetings and tasks from Neon..." />;
+    return <ShellMessage title="Loading RemiTask" body="Pulling your meetings, tasks, and topics from Neon..." />;
   }
 
   return (
@@ -634,6 +719,9 @@ export function RemiTaskApp() {
             </button>
             <button className="secondary-button" type="button" onClick={() => openTaskEditor()}>
               New task
+            </button>
+            <button className="secondary-button" type="button" onClick={() => openTopicEditor()}>
+              New topic
             </button>
             <FileButton label="Import ICS" accept=".ics,text/calendar" onChange={importIcs} />
             {session.authRequired ? (
@@ -683,14 +771,20 @@ export function RemiTaskApp() {
             summaryItems={summaryItems}
             meetings={meetingsForSelectedDate}
             tasks={dashboardTasks}
+            topics={allTopics}
             expandedNotes={expandedNotes}
+            expandedTopicNotes={expandedTopicNotes}
             meetingsById={meetingMap(appState.meetings)}
             onToggleNotes={toggleNotes}
+            onToggleTopicNotes={toggleTopicNotes}
             onEditMeeting={openMeetingEditor}
             onExtractMeeting={extractForMeeting}
             onDeleteMeeting={deleteMeeting}
             onToggleTaskDone={toggleTaskDone}
             onEditTask={openTaskEditor}
+            onEditTopic={openTopicEditor}
+            onMakeTaskFromTopic={makeTaskFromTopic}
+            onDeleteTopic={deleteTopic}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
           />
@@ -770,6 +864,20 @@ export function RemiTaskApp() {
           />
         </Modal>
       ) : null}
+
+      {topicDraft ? (
+        <Modal title={topicDraft.title || "Topic"} onClose={() => setTopicDraft(null)}>
+          <TopicEditor
+            draft={topicDraft}
+            projects={projects}
+            notesRef={topicNotesRef}
+            onChange={(patch) => setTopicDraft((current) => (current ? { ...current, ...patch } : current))}
+            onSave={saveTopicDraft}
+            onDelete={() => deleteTopic(topicDraft.id)}
+            onApplyNoteTool={applyTopicNoteTool}
+          />
+        </Modal>
+      ) : null}
     </main>
   );
 }
@@ -778,34 +886,46 @@ function DashboardView({
   summaryItems,
   meetings,
   tasks,
+  topics,
   expandedNotes,
+  expandedTopicNotes,
   meetingsById,
   onToggleNotes,
+  onToggleTopicNotes,
   onEditMeeting,
   onExtractMeeting,
   onDeleteMeeting,
   onToggleTaskDone,
   onEditTask,
+  onEditTopic,
+  onMakeTaskFromTopic,
+  onDeleteTopic,
   onMoveTaskToday,
   onMoveTaskWaiting,
 }: {
   summaryItems: (string | number)[][];
   meetings: Meeting[];
   tasks: Task[];
+  topics: Topic[];
   expandedNotes: Set<string>;
+  expandedTopicNotes: Set<string>;
   meetingsById: Map<string, Meeting>;
   onToggleNotes: (id: string) => void;
+  onToggleTopicNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
   onExtractMeeting: (meeting: Meeting) => void;
   onDeleteMeeting: (id: string) => void;
   onToggleTaskDone: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditTopic: (topic: Topic) => void;
+  onMakeTaskFromTopic: (topic: Topic) => void;
+  onDeleteTopic: (id: string) => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
 }) {
   return (
     <div className="grid gap-4">
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {summaryItems.map(([label, count]) => (
           <div key={String(label)} className="rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-sm">
             <strong className="block text-2xl">{count}</strong>
@@ -813,7 +933,7 @@ function DashboardView({
           </div>
         ))}
       </section>
-      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)_minmax(320px,0.9fr)]">
         <Panel title="Calendar">
           <MeetingList
             meetings={meetings}
@@ -834,6 +954,17 @@ function DashboardView({
             onEditTask={onEditTask}
             onMoveTaskToday={onMoveTaskToday}
             onMoveTaskWaiting={onMoveTaskWaiting}
+          />
+        </Panel>
+        <Panel title="Topics">
+          <TopicList
+            topics={topics}
+            expandedTopicNotes={expandedTopicNotes}
+            emptyText="No topics yet."
+            onToggleTopicNotes={onToggleTopicNotes}
+            onEditTopic={onEditTopic}
+            onMakeTask={onMakeTaskFromTopic}
+            onDeleteTopic={onDeleteTopic}
           />
         </Panel>
       </section>
@@ -1168,6 +1299,66 @@ function TaskList({
   );
 }
 
+function TopicList({
+  topics,
+  expandedTopicNotes,
+  emptyText,
+  onToggleTopicNotes,
+  onEditTopic,
+  onMakeTask,
+  onDeleteTopic,
+}: {
+  topics: Topic[];
+  expandedTopicNotes: Set<string>;
+  emptyText: string;
+  onToggleTopicNotes: (id: string) => void;
+  onEditTopic: (topic: Topic) => void;
+  onMakeTask: (topic: Topic) => void;
+  onDeleteTopic: (id: string) => void;
+}) {
+  if (!topics.length) return <EmptyState text={emptyText} />;
+  return (
+    <div className="grid gap-3">
+      {topics.map((topic) => {
+        const isExpanded = expandedTopicNotes.has(topic.id);
+        const hasMoreNotes = topic.notes && (topic.notes.length > 420 || topic.notes.split(/\r?\n/).length > 4);
+        return (
+          <article key={topic.id} className="grid min-w-0 gap-3 rounded-lg border border-[#c5d9ee] bg-white p-4 [overflow-wrap:anywhere]">
+            <div className="min-w-0">
+              <h3 className="font-semibold leading-snug">{topic.title}</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Tag>{topic.project || "Inbox"}</Tag>
+                <Tag tone="blue">Updated {formatDate((topic.updatedAt || topic.createdAt).slice(0, 10))}</Tag>
+              </div>
+              {topic.notes ? (
+                <div className={isExpanded ? "note-preview mt-3" : "note-preview compact mt-3"}>
+                  <NotePreview text={topic.notes} maxLines={isExpanded ? Infinity : 4} />
+                </div>
+              ) : null}
+              {hasMoreNotes ? (
+                <button className="mt-2 text-sm font-bold text-[#0b6b5c]" type="button" onClick={() => onToggleTopicNotes(topic.id)}>
+                  {isExpanded ? "Less notes" : "More notes"}
+                </button>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+              <button className="secondary-button" type="button" onClick={() => onEditTopic(topic)}>
+                Edit
+              </button>
+              <button className="secondary-button" type="button" onClick={() => onMakeTask(topic)}>
+                Make task
+              </button>
+              <button className="danger-button" type="button" onClick={() => onDeleteTopic(topic.id)}>
+                Delete
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function MeetingEditor({
   draft,
   projects,
@@ -1331,6 +1522,70 @@ function TaskEditor({
         </button>
         <button className="primary-button w-full sm:w-auto" type="submit">
           Save task
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TopicEditor({
+  draft,
+  projects,
+  notesRef,
+  onChange,
+  onSave,
+  onDelete,
+  onApplyNoteTool,
+}: {
+  draft: Topic;
+  projects: string[];
+  notesRef: React.RefObject<HTMLTextAreaElement | null>;
+  onChange: (patch: Partial<Topic>) => void;
+  onSave: () => void;
+  onDelete: () => void;
+  onApplyNoteTool: (tool: NoteTool) => void;
+}) {
+  return (
+    <form
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        <LabeledInput label="Topic" value={draft.title} onChange={(value) => onChange({ title: value })} autoFocus />
+        <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="topic-project-options" />
+      </div>
+      <datalist id="topic-project-options">
+        {projects.map((project) => (
+          <option key={project} value={project} />
+        ))}
+      </datalist>
+      <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
+        Notes
+        <NoteToolbar onApply={onApplyNoteTool} />
+        <textarea
+          ref={notesRef}
+          className="min-h-[12rem] rounded-md border border-[#cfd9d4] px-3 py-2 text-[#17201c] outline-none focus:border-[#0b6b5c]"
+          value={draft.notes}
+          onChange={(event) => onChange({ notes: event.target.value })}
+        />
+      </label>
+      {draft.notes.trim() ? (
+        <div className="rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-4">
+          <p className="mb-2 text-xs font-bold uppercase text-[#53635c]">Preview</p>
+          <div className="note-preview">
+            <NotePreview text={draft.notes} />
+          </div>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
+          Delete
+        </button>
+        <button className="primary-button w-full sm:w-auto" type="submit">
+          Save topic
         </button>
       </div>
     </form>
@@ -1689,6 +1944,7 @@ function normalizeLoadedState(raw: unknown): AppState {
   return {
     meetings: [...(Array.isArray(source.meetings) ? source.meetings : []), ...legacyMeetings].map(normalizeMeeting),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(normalizeTask),
+    topics: (Array.isArray(source.topics) ? source.topics : []).map(normalizeTopic),
     notes: [],
     imports: Array.isArray(source.imports) ? source.imports.filter((item): item is string => typeof item === "string") : [],
   };
@@ -1732,6 +1988,18 @@ function normalizeTask(raw: Partial<Task>): Task {
   };
 }
 
+function normalizeTopic(raw: Partial<Topic>): Topic {
+  const now = new Date().toISOString();
+  return {
+    id: cleanText(raw.id) || createId(),
+    title: cleanText(raw.title),
+    project: cleanText(raw.project) || "Inbox",
+    notes: cleanText(raw.notes),
+    createdAt: cleanText(raw.createdAt) || now,
+    updatedAt: cleanText(raw.updatedAt) || cleanText(raw.createdAt) || now,
+  };
+}
+
 function blankMeeting(date: string): Meeting {
   const now = new Date().toISOString();
   return {
@@ -1766,6 +2034,18 @@ function blankTask(project: string): Task {
     meetingId: "",
     createdAt: new Date().toISOString(),
     completedAt: "",
+  };
+}
+
+function blankTopic(project: string): Topic {
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    title: "",
+    project,
+    notes: "",
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -2000,6 +2280,10 @@ function sortTasksForDisplay(left: Task, right: Task) {
   const priorityDelta = priorityOrder[left.priority] - priorityOrder[right.priority];
   if (priorityDelta) return priorityDelta;
   return (right.completedAt || right.createdAt || "").localeCompare(left.completedAt || left.createdAt || "");
+}
+
+function sortTopicsForDisplay(left: Topic, right: Topic) {
+  return (right.updatedAt || right.createdAt || "").localeCompare(left.updatedAt || left.createdAt || "");
 }
 
 function priorityBorder(priority: TaskPriority) {

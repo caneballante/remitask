@@ -2,6 +2,7 @@
 
 import {
   ChangeEvent,
+  ClipboardEvent,
   Component,
   ErrorInfo,
   FormEvent,
@@ -120,8 +121,6 @@ export function RemiTaskApp() {
   const appStateRef = useRef(appState);
   const saveQueueRef = useRef(Promise.resolve());
   const saveGenerationRef = useRef(0);
-  const meetingNotesRef = useRef<HTMLTextAreaElement>(null);
-  const topicNotesRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     async function checkSession() {
@@ -639,28 +638,6 @@ export function RemiTaskApp() {
     });
   }
 
-  function applyNoteTool(tool: NoteTool) {
-    if (!meetingDraft || !meetingNotesRef.current) return;
-    const textarea = meetingNotesRef.current;
-    const result = applyNoteToolToValue(textarea.value, textarea.selectionStart, textarea.selectionEnd, tool);
-    setMeetingDraft({ ...meetingDraft, notes: result.value });
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
-    });
-  }
-
-  function applyTopicNoteTool(tool: NoteTool) {
-    if (!topicDraft || !topicNotesRef.current) return;
-    const textarea = topicNotesRef.current;
-    const result = applyNoteToolToValue(textarea.value, textarea.selectionStart, textarea.selectionEnd, tool);
-    setTopicDraft({ ...topicDraft, notes: result.value });
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
-    });
-  }
-
   if (!session.checked) {
     return <ShellMessage title="Loading RemiTask" body="Checking your session..." />;
   }
@@ -835,7 +812,6 @@ export function RemiTaskApp() {
           <MeetingEditor
             draft={meetingDraft}
             projects={projects}
-            notesRef={meetingNotesRef}
             suggestions={suggestionMeeting?.id === meetingDraft.id ? suggestions : []}
             suggestionMessage={suggestionMeeting?.id === meetingDraft.id ? suggestionMessage : ""}
             isExtracting={isExtracting}
@@ -843,7 +819,6 @@ export function RemiTaskApp() {
             onSave={() => saveMeetingDraft()}
             onDelete={() => deleteMeeting(meetingDraft.id)}
             onExtract={saveDraftAndExtract}
-            onApplyNoteTool={applyNoteTool}
             onSuggestionChange={(index, patch) =>
               setSuggestions((current) => current.map((suggestion, itemIndex) => (itemIndex === index ? { ...suggestion, ...patch } : suggestion)))
             }
@@ -870,11 +845,9 @@ export function RemiTaskApp() {
           <TopicEditor
             draft={topicDraft}
             projects={projects}
-            notesRef={topicNotesRef}
             onChange={(patch) => setTopicDraft((current) => (current ? { ...current, ...patch } : current))}
             onSave={saveTopicDraft}
             onDelete={() => deleteTopic(topicDraft.id)}
-            onApplyNoteTool={applyTopicNoteTool}
           />
         </Modal>
       ) : null}
@@ -1262,7 +1235,11 @@ function TaskList({
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0">
                   <h3 className={task.status === "Done" ? "font-semibold leading-snug line-through" : "font-semibold leading-snug"}>{task.title}</h3>
-                  {task.notes ? <p className="mt-1 text-sm text-[#53635c]">{task.notes}</p> : null}
+                  {task.notes ? (
+                    <div className="note-preview compact mt-2 text-sm text-[#53635c]">
+                      <NotePreview text={task.notes} maxLines={3} />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap md:shrink-0 md:justify-end">
                   <button className="secondary-button" type="button" onClick={() => onEditTask(task)}>
@@ -1362,7 +1339,6 @@ function TopicList({
 function MeetingEditor({
   draft,
   projects,
-  notesRef,
   suggestions,
   suggestionMessage,
   isExtracting,
@@ -1370,13 +1346,11 @@ function MeetingEditor({
   onSave,
   onDelete,
   onExtract,
-  onApplyNoteTool,
   onSuggestionChange,
   onAddSuggestions,
 }: {
   draft: Meeting;
   projects: string[];
-  notesRef: React.RefObject<HTMLTextAreaElement | null>;
   suggestions: TaskSuggestion[];
   suggestionMessage: string;
   isExtracting: boolean;
@@ -1384,7 +1358,6 @@ function MeetingEditor({
   onSave: () => void;
   onDelete: () => void;
   onExtract: () => void;
-  onApplyNoteTool: (tool: NoteTool) => void;
   onSuggestionChange: (index: number, patch: Partial<TaskSuggestion>) => void;
   onAddSuggestions: () => void;
 }) {
@@ -1412,24 +1385,7 @@ function MeetingEditor({
           <option key={project} value={project} />
         ))}
       </datalist>
-      <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
-        Notes
-        <NoteToolbar onApply={onApplyNoteTool} />
-        <textarea
-          ref={notesRef}
-          className="min-h-[13rem] rounded-md border border-[#cfd9d4] px-3 py-2 text-[#17201c] outline-none focus:border-[#0b6b5c]"
-          value={draft.notes}
-          onChange={(event) => onChange({ notes: event.target.value })}
-        />
-      </label>
-      {draft.notes.trim() ? (
-        <div className="rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-4">
-          <p className="mb-2 text-xs font-bold uppercase text-[#53635c]">Preview</p>
-          <div className="note-preview">
-            <NotePreview text={draft.notes} />
-          </div>
-        </div>
-      ) : null}
+      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[13rem]" />
       {suggestionMessage ? (
         <SuggestionPanel
           meeting={draft}
@@ -1508,14 +1464,7 @@ function TaskEditor({
           <option key={project} value={project} />
         ))}
       </datalist>
-      <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
-        Notes
-        <textarea
-          className="min-h-[7rem] rounded-md border border-[#cfd9d4] px-3 py-2 text-[#17201c] outline-none focus:border-[#0b6b5c]"
-          value={draft.notes}
-          onChange={(event) => onChange({ notes: event.target.value })}
-        />
-      </label>
+      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[7rem]" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
@@ -1531,19 +1480,15 @@ function TaskEditor({
 function TopicEditor({
   draft,
   projects,
-  notesRef,
   onChange,
   onSave,
   onDelete,
-  onApplyNoteTool,
 }: {
   draft: Topic;
   projects: string[];
-  notesRef: React.RefObject<HTMLTextAreaElement | null>;
   onChange: (patch: Partial<Topic>) => void;
   onSave: () => void;
   onDelete: () => void;
-  onApplyNoteTool: (tool: NoteTool) => void;
 }) {
   return (
     <form
@@ -1562,24 +1507,7 @@ function TopicEditor({
           <option key={project} value={project} />
         ))}
       </datalist>
-      <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
-        Notes
-        <NoteToolbar onApply={onApplyNoteTool} />
-        <textarea
-          ref={notesRef}
-          className="min-h-[12rem] rounded-md border border-[#cfd9d4] px-3 py-2 text-[#17201c] outline-none focus:border-[#0b6b5c]"
-          value={draft.notes}
-          onChange={(event) => onChange({ notes: event.target.value })}
-        />
-      </label>
-      {draft.notes.trim() ? (
-        <div className="rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-4">
-          <p className="mb-2 text-xs font-bold uppercase text-[#53635c]">Preview</p>
-          <div className="note-preview">
-            <NotePreview text={draft.notes} />
-          </div>
-        </div>
-      ) : null}
+      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[12rem]" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
@@ -1816,21 +1744,128 @@ function FileButton({
   );
 }
 
-function NoteToolbar({ onApply }: { onApply: (tool: NoteTool) => void }) {
+function RichTextEditor({
+  label,
+  value,
+  onChange,
+  minHeightClass,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  minHeightClass: string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [activeTools, setActiveTools] = useState<Partial<Record<NoteTool, boolean>>>({});
+
+  const syncFromDom = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const markdown = editorHtmlToMarkdown(editor);
+    editor.dataset.lastMarkdown = markdown;
+    onChange(markdown);
+  }, [onChange]);
+
+  const refreshToolbarState = useCallback(() => {
+    if (typeof document === "undefined") return;
+    const listItem = currentListItem(editorRef.current);
+    const formatBlock = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
+    setActiveTools({
+      bold: document.queryCommandState("bold"),
+      bullet: document.queryCommandState("insertUnorderedList"),
+      heading: ["h1", "h2", "h3", "h4", "h5", "h6"].includes(formatBlock),
+      task: listItem?.dataset.task === "true",
+    });
+  }, []);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (document.activeElement === editor && editor.dataset.lastMarkdown === value) return;
+    editor.innerHTML = markdownToEditorHtml(value);
+    editor.dataset.lastMarkdown = value;
+  }, [value]);
+
+  function runCommand(tool: NoteTool) {
+    const editor = editorRef.current;
+    if (!editor || typeof document === "undefined") return;
+    editor.focus();
+
+    if (tool === "bold") {
+      document.execCommand("bold");
+    } else if (tool === "bullet") {
+      document.execCommand("insertUnorderedList");
+    } else if (tool === "heading") {
+      const isHeading = activeTools.heading;
+      document.execCommand("formatBlock", false, isHeading ? "P" : "H4");
+    } else if (tool === "divider") {
+      document.execCommand("insertHorizontalRule");
+    } else if (tool === "task") {
+      let item = currentListItem(editor);
+      if (!item) {
+        document.execCommand("insertUnorderedList");
+        item = currentListItem(editor);
+      }
+      if (item) item.dataset.task = item.dataset.task === "true" ? "false" : "true";
+    }
+
+    syncFromDom();
+    refreshToolbarState();
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const text = event.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
+    syncFromDom();
+    refreshToolbarState();
+  }
+
   return (
-    <div className="flex flex-wrap gap-2">
-      {[
-        ["bold", "Bold"],
-        ["bullet", "Bullet"],
-        ["task", "Task"],
-        ["heading", "Heading"],
-        ["divider", "Divider"],
-      ].map(([tool, label]) => (
-        <button key={tool} className="secondary-button" type="button" onClick={() => onApply(tool as NoteTool)}>
-          {label}
-        </button>
-      ))}
-    </div>
+    <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
+      {label}
+      <div className="overflow-hidden rounded-lg border border-[#cfd9d4] bg-white focus-within:border-[#0b6b5c]">
+        <div className="flex flex-wrap gap-1 border-b border-[#d9e1dd] bg-[#f7f9f8] p-2">
+          {[
+            ["bold", "B", "Bold"],
+            ["bullet", "Bullet", "Bulleted list"],
+            ["task", "Task", "Task line"],
+            ["heading", "H", "Heading"],
+            ["divider", "Rule", "Divider"],
+          ].map(([tool, text, title]) => (
+            <button
+              key={tool}
+              className={activeTools[tool as NoteTool] ? "editor-tool active" : "editor-tool"}
+              type="button"
+              title={title}
+              aria-label={title}
+              aria-pressed={Boolean(activeTools[tool as NoteTool])}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => runCommand(tool as NoteTool)}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+        <div
+          ref={editorRef}
+          className={`rich-editor note-preview ${minHeightClass}`}
+          contentEditable
+          role="textbox"
+          aria-multiline="true"
+          aria-label={label}
+          suppressContentEditableWarning
+          onInput={() => {
+            syncFromDom();
+            refreshToolbarState();
+          }}
+          onKeyUp={refreshToolbarState}
+          onMouseUp={refreshToolbarState}
+          onFocus={refreshToolbarState}
+          onPaste={handlePaste}
+        />
+      </div>
+    </label>
   );
 }
 
@@ -1876,6 +1911,116 @@ type NoteNode =
   | { type: "h"; level: number; text: string }
   | { type: "hr" }
   | { type: "ul"; items: { text: string; task: boolean }[] };
+
+function markdownToEditorHtml(text: string) {
+  const nodes = buildNoteNodes(text, Infinity);
+  if (!nodes.length) return "<p><br></p>";
+  return nodes
+    .map((node) => {
+      if (node.type === "hr") return "<hr>";
+      if (node.type === "h") return `<h${node.level}>${inlineMarkdownToHtml(node.text)}</h${node.level}>`;
+      if (node.type === "ul") {
+        const items = node.items
+          .map((item) => `<li${item.task ? ' data-task="true"' : ""}>${inlineMarkdownToHtml(item.text) || "<br>"}</li>`)
+          .join("");
+        return `<ul>${items}</ul>`;
+      }
+      return `<p>${inlineMarkdownToHtml(node.text) || "<br>"}</p>`;
+    })
+    .join("");
+}
+
+function editorHtmlToMarkdown(root: HTMLElement) {
+  const lines = Array.from(root.childNodes).flatMap((node) => blockNodeToMarkdown(node));
+  return trimEmptyEdges(lines).join("\n");
+}
+
+function blockNodeToMarkdown(node: ChildNode): string[] {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = normalizeEditorWhitespace(node.textContent || "");
+    return text ? [text] : [];
+  }
+
+  if (!(node instanceof HTMLElement)) return [];
+  const tag = node.tagName.toLowerCase();
+
+  if (tag === "br") return [""];
+  if (tag === "hr") return ["---"];
+  if (tag === "ul" || tag === "ol") {
+    return Array.from(node.children)
+      .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li")
+      .map((item) => `${item.dataset.task === "true" ? "task - " : "- "}${inlineNodeToMarkdown(item).trim()}`)
+      .filter((line) => line.trim() !== "-" && line.trim() !== "task -");
+  }
+  if (/^h[1-6]$/.test(tag)) {
+    const text = inlineNodeToMarkdown(node).trim();
+    return text ? [`## ${text}`] : [];
+  }
+  if (tag === "div" || tag === "p") {
+    const childBlocks = Array.from(node.childNodes).flatMap((child) => {
+      if (child instanceof HTMLElement && ["ul", "ol", "hr"].includes(child.tagName.toLowerCase())) return blockNodeToMarkdown(child);
+      return [];
+    });
+    if (childBlocks.length) return childBlocks;
+    const text = inlineNodeToMarkdown(node).trim();
+    return text ? [text] : [""];
+  }
+  if (tag === "li") {
+    const text = inlineNodeToMarkdown(node).trim();
+    return text ? [`${node.dataset.task === "true" ? "task - " : "- "}${text}`] : [];
+  }
+
+  const text = inlineNodeToMarkdown(node).trim();
+  return text ? [text] : [];
+}
+
+function inlineNodeToMarkdown(node: ChildNode): string {
+  if (node.nodeType === Node.TEXT_NODE) return normalizeEditorWhitespace(node.textContent || "");
+  if (!(node instanceof HTMLElement)) return "";
+
+  const tag = node.tagName.toLowerCase();
+  if (tag === "br") return "\n";
+  if (tag === "strong" || tag === "b") {
+    const text = Array.from(node.childNodes).map(inlineNodeToMarkdown).join("").trim();
+    return text ? `**${text}**` : "";
+  }
+  if (tag === "ul" || tag === "ol" || tag === "hr") return "";
+  return Array.from(node.childNodes).map(inlineNodeToMarkdown).join("");
+}
+
+function inlineMarkdownToHtml(text: string) {
+  return escapeEditorHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function escapeEditorHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#039;",
+  }[char] || char));
+}
+
+function normalizeEditorWhitespace(value: string) {
+  return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ");
+}
+
+function trimEmptyEdges(lines: string[]) {
+  const next = [...lines];
+  while (next.length && !next[0].trim()) next.shift();
+  while (next.length && !next[next.length - 1].trim()) next.pop();
+  return next;
+}
+
+function currentListItem(editor: HTMLElement | null) {
+  if (!editor || typeof window === "undefined") return null;
+  const selection = window.getSelection();
+  const node = selection?.anchorNode;
+  if (!node || !editor.contains(node)) return null;
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  return element?.closest("li") as HTMLLIElement | null;
+}
 
 function buildNoteNodes(text: string, maxLines: number): NoteNode[] {
   const nodes: NoteNode[] = [];
@@ -2207,49 +2352,6 @@ function calendarInstanceUid(uid: string, date: string, start: string) {
 
 function decodeIcsText(value: string) {
   return value.replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\").trim();
-}
-
-function applyNoteToolToValue(value: string, selectionStart: number, selectionEnd: number, tool: NoteTool) {
-  if (tool === "bold") return wrapSelectedText(value, selectionStart, selectionEnd, "**", "**", "bold text");
-  if (tool === "bullet") return prefixSelectedLines(value, selectionStart, selectionEnd, "- ");
-  if (tool === "task") return prefixSelectedLines(value, selectionStart, selectionEnd, "task - ");
-  if (tool === "heading") return prefixSelectedLines(value, selectionStart, selectionEnd, "## ");
-  return insertAtSelection(value, selectionStart, selectionEnd, "\n---\n");
-}
-
-function wrapSelectedText(value: string, start: number, end: number, before: string, after: string, placeholder: string) {
-  const selected = value.slice(start, end) || placeholder;
-  const replacement = `${before}${selected}${after}`;
-  return {
-    value: `${value.slice(0, start)}${replacement}${value.slice(end)}`,
-    selectionStart: start,
-    selectionEnd: start + replacement.length,
-  };
-}
-
-function prefixSelectedLines(value: string, start: number, end: number, prefix: string) {
-  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-  const lineEnd = end < value.length ? value.indexOf("\n", end) : value.length;
-  const resolvedEnd = lineEnd === -1 ? value.length : lineEnd;
-  const selected = value.slice(lineStart, resolvedEnd);
-  const replacement = (selected || "")
-    .split("\n")
-    .map((line) => (line.trim() ? `${prefix}${line.replace(/^([-*]\s+|#{1,3}\s+|(?:task|todo|to do|action item|action|next step)\s*[:\-]\s*)/i, "")}` : line))
-    .join("\n");
-  const nextValue = `${value.slice(0, lineStart)}${replacement || prefix}${value.slice(resolvedEnd)}`;
-  return {
-    value: nextValue,
-    selectionStart: lineStart,
-    selectionEnd: lineStart + (replacement || prefix).length,
-  };
-}
-
-function insertAtSelection(value: string, start: number, end: number, insert: string) {
-  return {
-    value: `${value.slice(0, start)}${insert}${value.slice(end)}`,
-    selectionStart: start + insert.length,
-    selectionEnd: start + insert.length,
-  };
 }
 
 function groupTasksByProject(tasks: Task[]) {

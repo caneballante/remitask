@@ -10,6 +10,7 @@ import {
   ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -1756,6 +1757,7 @@ function RichTextEditor({
   minHeightClass: string;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const labelId = useId();
   const [activeTools, setActiveTools] = useState<Partial<Record<NoteTool, boolean>>>({});
 
   const syncFromDom = useCallback(() => {
@@ -1822,8 +1824,8 @@ function RichTextEditor({
   }
 
   return (
-    <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
-      {label}
+    <div className="grid gap-2 text-sm font-semibold text-[#53635c]">
+      <span id={labelId}>{label}</span>
       <div className="overflow-hidden rounded-lg border border-[#cfd9d4] bg-white focus-within:border-[#0b6b5c]">
         <div className="flex flex-wrap gap-1 border-b border-[#d9e1dd] bg-[#f7f9f8] p-2">
           {[
@@ -1853,7 +1855,7 @@ function RichTextEditor({
           contentEditable
           role="textbox"
           aria-multiline="true"
-          aria-label={label}
+          aria-labelledby={labelId}
           suppressContentEditableWarning
           onInput={() => {
             syncFromDom();
@@ -1865,7 +1867,7 @@ function RichTextEditor({
           onPaste={handlePaste}
         />
       </div>
-    </label>
+    </div>
   );
 }
 

@@ -900,7 +900,7 @@ function DashboardView({
 }) {
   return (
     <div className="grid gap-4">
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr))]">
         {summaryItems.map(([label, count]) => (
           <div key={String(label)} className="rounded-lg border border-[#d9e1dd] bg-white p-4 shadow-sm">
             <strong className="block text-2xl">{count}</strong>
@@ -908,12 +908,13 @@ function DashboardView({
           </div>
         ))}
       </section>
-      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)_minmax(320px,0.9fr)]">
-        <Panel title="Calendar">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)_minmax(320px,0.9fr)]">
+        <Panel title="Calendar" className="xl:col-span-2 2xl:col-span-1">
           <MeetingList
             meetings={meetings}
             expandedNotes={expandedNotes}
             emptyText="No meetings on this date."
+            density="compact"
             onToggleNotes={onToggleNotes}
             onEditMeeting={onEditMeeting}
             onExtractMeeting={onExtractMeeting}
@@ -1128,6 +1129,7 @@ function MeetingList({
   meetings,
   expandedNotes,
   emptyText,
+  density = "spacious",
   onToggleNotes,
   onEditMeeting,
   onExtractMeeting,
@@ -1136,6 +1138,7 @@ function MeetingList({
   meetings: Meeting[];
   expandedNotes: Set<string>;
   emptyText: string;
+  density?: "compact" | "spacious";
   onToggleNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
   onExtractMeeting: (meeting: Meeting) => void;
@@ -1156,11 +1159,12 @@ function MeetingList({
           <article
             key={meeting.id}
             className={[
-              "grid min-w-0 gap-3 rounded-lg border p-4 md:grid-cols-[7.5rem_minmax(0,1fr)_auto]",
+              "grid min-w-0 gap-3 rounded-lg border p-4",
+              density === "spacious" ? "md:grid-cols-[7.5rem_minmax(0,1fr)_auto]" : "",
               dayToneClass,
             ].join(" ")}
           >
-            <div className="text-sm font-bold text-[#235d91]">
+            <div className={density === "compact" ? "flex flex-wrap gap-x-3 gap-y-1 text-sm font-bold text-[#235d91]" : "text-sm font-bold text-[#235d91]"}>
               <span className="block">{time}</span>
               <span className="block text-[#53635c]">{formatDate(meeting.date)}</span>
             </div>
@@ -1178,7 +1182,13 @@ function MeetingList({
                 </button>
               ) : null}
             </div>
-            <div className="grid grid-cols-3 gap-2 md:flex md:flex-wrap md:items-start md:justify-end">
+            <div
+              className={
+                density === "compact"
+                  ? "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3"
+                  : "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 md:flex md:flex-wrap md:items-start md:justify-end"
+              }
+            >
               <button className="secondary-button" type="button" onClick={() => onEditMeeting(meeting)}>
                 Edit
               </button>
@@ -1649,9 +1659,9 @@ function InlineNoteText({ text }: { text: string }) {
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="min-w-0 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4">
+    <section className={`min-w-0 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 ${className}`}>
       <h2 className="mb-4 text-lg font-semibold">{title}</h2>
       {children}
     </section>
@@ -1765,14 +1775,20 @@ function RichTextEditor({
     const editor = editorRef.current;
     if (!editor) return;
     const markdown = editorHtmlToMarkdown(editor);
-    editor.dataset.lastMarkdown = markdown;
+    setEditorMarkdownDataset(editor, markdown);
     onChange(markdown);
   }, [onChange]);
 
   const refreshToolbarState = useCallback(() => {
-    if (typeof document === "undefined") return;
-    const listItem = currentListItem(editorRef.current);
-    const formatBlock = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
+    const editor = editorRef.current;
+    if (typeof document === "undefined" || !editor || !editorHasSelection(editor)) {
+      setActiveTools({});
+      return;
+    }
+    const listItem = currentListItem(editor);
+    const formatBlock = String(document.queryCommandValue("formatBlock") || "")
+      .replace(/[<>]/g, "")
+      .toLowerCase();
     setActiveTools({
       bold: document.queryCommandState("bold"),
       bullet: document.queryCommandState("insertUnorderedList"),
@@ -1786,7 +1802,7 @@ function RichTextEditor({
     if (!editor) return;
     if (document.activeElement === editor && editor.dataset.lastMarkdown === value) return;
     editor.innerHTML = markdownToEditorHtml(value);
-    editor.dataset.lastMarkdown = value;
+    setEditorMarkdownDataset(editor, value);
   }, [value]);
 
   function runCommand(tool: NoteTool) {
@@ -1852,11 +1868,12 @@ function RichTextEditor({
         </div>
         <div
           ref={editorRef}
-          className={`rich-editor note-preview ${minHeightClass}`}
+          className={`rich-editor ${minHeightClass}`}
           contentEditable
           role="textbox"
           aria-multiline="true"
           aria-labelledby={labelId}
+          data-placeholder="Start typing..."
           suppressContentEditableWarning
           onInput={() => {
             syncFromDom();
@@ -2014,6 +2031,18 @@ function trimEmptyEdges(lines: string[]) {
   while (next.length && !next[0].trim()) next.shift();
   while (next.length && !next[next.length - 1].trim()) next.pop();
   return next;
+}
+
+function setEditorMarkdownDataset(editor: HTMLElement, markdown: string) {
+  editor.dataset.lastMarkdown = markdown;
+  editor.dataset.empty = markdown.trim() ? "false" : "true";
+}
+
+function editorHasSelection(editor: HTMLElement) {
+  if (typeof window === "undefined") return false;
+  const selection = window.getSelection();
+  if (!selection?.anchorNode) return document.activeElement === editor;
+  return editor.contains(selection.anchorNode);
 }
 
 function currentListItem(editor: HTMLElement | null) {

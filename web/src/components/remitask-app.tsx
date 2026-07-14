@@ -312,7 +312,6 @@ export function RemiTaskApp() {
 
   function openMeetingEditor(meeting?: Meeting) {
     setMeetingDraft(meeting ? { ...meeting } : blankMeeting(selectedDate));
-    setActiveTab("meetings");
   }
 
   function closeMeetingEditor() {
@@ -365,9 +364,11 @@ export function RemiTaskApp() {
     }
   }
 
-  async function extractForMeeting(meeting: Meeting) {
+  async function extractForMeeting(meeting: Meeting, options: { revealMeetingsTab?: boolean } = {}) {
     const savedMeeting = appStateRef.current.meetings.find((item) => item.id === meeting.id) || meeting;
-    setActiveTab("meetings");
+    if (options.revealMeetingsTab !== false) {
+      setActiveTab("meetings");
+    }
     setSuggestionMeeting(savedMeeting);
     setSuggestions([]);
     setSuggestionMessage("Extracting tasks...");
@@ -399,7 +400,7 @@ export function RemiTaskApp() {
 
   async function saveDraftAndExtract() {
     const savedMeeting = saveMeetingDraft({ close: false });
-    if (savedMeeting) await extractForMeeting(savedMeeting);
+    if (savedMeeting) await extractForMeeting(savedMeeting, { revealMeetingsTab: false });
   }
 
   function addSelectedSuggestions() {

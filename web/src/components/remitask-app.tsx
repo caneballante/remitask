@@ -50,6 +50,7 @@ const EMPTY_STATE: AppState = {
 type ActiveTab = "dashboard" | "meetings" | "tasks";
 type TaskView = "today" | "next" | "waiting" | "projects" | "done";
 type SaveStatus = "Loaded" | "Saving..." | "Saved" | "Save failed";
+type MeetingNotesFilter = "all" | "with-notes" | "without-notes";
 type SessionState = {
   checked: boolean;
   authenticated: boolean;
@@ -105,6 +106,8 @@ export function RemiTaskApp() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("Loaded");
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [selectedDate, setSelectedDate] = useState(todayIso());
+  const [meetingSearch, setMeetingSearch] = useState("");
+  const [meetingNotesFilter, setMeetingNotesFilter] = useState<MeetingNotesFilter>("all");
   const [taskView, setTaskView] = useState<TaskView>("today");
   const [taskSearch, setTaskSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
@@ -237,6 +240,18 @@ export function RemiTaskApp() {
   const allMeetings = useMemo(() => {
     return [...appState.meetings].sort((left, right) => meetingDateTime(right).localeCompare(meetingDateTime(left)));
   }, [appState.meetings]);
+
+  const visibleMeetings = useMemo(() => {
+    const search = meetingSearch.trim().toLowerCase();
+    return allMeetings.filter((meeting) => {
+      const hasNotes = Boolean(meeting.notes.trim());
+      if (meetingNotesFilter === "with-notes" && !hasNotes) return false;
+      if (meetingNotesFilter === "without-notes" && hasNotes) return false;
+      if (!search) return true;
+      const haystack = [meeting.title, meeting.project, meeting.date, meeting.location, meeting.attendees, meeting.notes].join(" ").toLowerCase();
+      return haystack.includes(search);
+    });
+  }, [allMeetings, meetingNotesFilter, meetingSearch]);
 
   const allTopics = useMemo(() => {
     return [...appState.topics].sort(sortTopicsForDisplay);
@@ -538,6 +553,17 @@ export function RemiTaskApp() {
     });
   }
 
+  function makeTopicFromMeeting(meeting: Meeting) {
+    const source = `${formatDate(meeting.date)}${meeting.start ? ` ${formatTime(meeting.start)}` : ""}`;
+    const title = meeting.title || "Meeting notes";
+    setMeetingDraft(null);
+    setTopicDraft({
+      ...blankTopic(meeting.project || projects[0] || "Inbox"),
+      title,
+      notes: [`Source: ${source} - ${title}`, meeting.notes.trim()].filter(Boolean).join("\n\n"),
+    });
+  }
+
   function exportData() {
     const data = JSON.stringify(appStateRef.current, null, 2);
     const blob = new Blob([data], { type: "application/json" });
@@ -771,13 +797,18 @@ export function RemiTaskApp() {
 
         {activeTab === "meetings" ? (
           <MeetingsView
-            meetings={allMeetings}
+            meetings={visibleMeetings}
+            totalMeetings={allMeetings.length}
             expandedNotes={expandedNotes}
             suggestions={suggestions}
             suggestionMeeting={suggestionMeeting}
             suggestionMessage={suggestionMessage}
             isExtracting={isExtracting}
             projects={projects}
+            meetingSearch={meetingSearch}
+            meetingNotesFilter={meetingNotesFilter}
+            onSearchChange={setMeetingSearch}
+            onNotesFilterChange={setMeetingNotesFilter}
             onNewMeeting={() => openMeetingEditor()}
             onToggleNotes={toggleNotes}
             onEditMeeting={openMeetingEditor}
@@ -821,6 +852,10 @@ export function RemiTaskApp() {
             onSave={() => saveMeetingDraft()}
             onDelete={() => deleteMeeting(meetingDraft.id)}
             onExtract={saveDraftAndExtract}
+            onMakeTopic={() => {
+              const savedMeeting = saveMeetingDraft({ close: false });
+              if (savedMeeting) makeTopicFromMeeting(savedMeeting);
+            }}
             onSuggestionChange={(index, patch) =>
               setSuggestions((current) => current.map((suggestion, itemIndex) => (itemIndex === index ? { ...suggestion, ...patch } : suggestion)))
             }
@@ -950,12 +985,17 @@ function DashboardView({
 
 function MeetingsView({
   meetings,
+  totalMeetings,
   expandedNotes,
   suggestions,
   suggestionMeeting,
   suggestionMessage,
   isExtracting,
   projects,
+  meetingSearch,
+  meetingNotesFilter,
+  onSearchChange,
+  onNotesFilterChange,
   onNewMeeting,
   onToggleNotes,
   onEditMeeting,
@@ -965,12 +1005,17 @@ function MeetingsView({
   onAddSuggestions,
 }: {
   meetings: Meeting[];
+  totalMeetings: number;
   expandedNotes: Set<string>;
   suggestions: TaskSuggestion[];
   suggestionMeeting: Meeting | null;
   suggestionMessage: string;
   isExtracting: boolean;
   projects: string[];
+  meetingSearch: string;
+  meetingNotesFilter: MeetingNotesFilter;
+  onSearchChange: (search: string) => void;
+  onNotesFilterChange: (filter: MeetingNotesFilter) => void;
   onNewMeeting: () => void;
   onToggleNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
@@ -1001,11 +1046,36 @@ function MeetingsView({
           onAdd={onAddSuggestions}
         />
       ) : null}
-      <Panel title="Calendar events">
+      <section className="grid min-w-0 gap-3 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-center">
+        <input
+          className="field"
+          type="search"
+          value={meetingSearch}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search meeting notes"
+        />
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+          {[
+            ["all", "All"],
+            ["with-notes", "Has notes"],
+            ["without-notes", "No notes"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className={meetingNotesFilter === id ? "small-tab active" : "small-tab"}
+              type="button"
+              onClick={() => onNotesFilterChange(id as MeetingNotesFilter)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+      <Panel title={`Calendar events${meetings.length === totalMeetings ? "" : ` (${meetings.length} of ${totalMeetings})`}`}>
         <MeetingList
           meetings={meetings}
           expandedNotes={expandedNotes}
-          emptyText="No meetings yet."
+          emptyText={totalMeetings ? "No meetings match these filters." : "No meetings yet."}
           onToggleNotes={onToggleNotes}
           onEditMeeting={onEditMeeting}
           onExtractMeeting={onExtractMeeting}
@@ -1358,6 +1428,7 @@ function MeetingEditor({
   onSave,
   onDelete,
   onExtract,
+  onMakeTopic,
   onSuggestionChange,
   onAddSuggestions,
 }: {
@@ -1370,9 +1441,21 @@ function MeetingEditor({
   onSave: () => void;
   onDelete: () => void;
   onExtract: () => void;
+  onMakeTopic: () => void;
   onSuggestionChange: (index: number, patch: Partial<TaskSuggestion>) => void;
   onAddSuggestions: () => void;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(!draft.notes.trim());
+  const detailsSummary = [
+    formatDate(draft.date),
+    draft.start ? formatTime(draft.start) : "",
+    draft.project,
+    draft.location,
+    draft.attendees ? "Attendees" : "",
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
   return (
     <form
       className="grid gap-4"
@@ -1381,23 +1464,32 @@ function MeetingEditor({
         onSave();
       }}
     >
-      <div className="grid gap-3 lg:grid-cols-2">
-        <LabeledInput label="Title" value={draft.title} onChange={(value) => onChange({ title: value })} autoFocus />
-        <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="project-options" />
-        <LabeledInput label="Date" type="date" value={draft.date} onChange={(value) => onChange({ date: value })} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <LabeledInput label="Start" type="time" value={draft.start} onChange={(value) => onChange({ start: value })} />
-          <LabeledInput label="End" type="time" value={draft.end} onChange={(value) => onChange({ end: value })} />
+      <LabeledInput label="Title" value={draft.title} onChange={(value) => onChange({ title: value })} autoFocus />
+      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[18rem]" />
+      <details
+        className="rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-3 text-sm text-[#53635c]"
+        open={detailsOpen}
+        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer font-bold text-[#17201c]">
+          Details{detailsSummary ? <span className="ml-2 font-semibold text-[#53635c]">{detailsSummary}</span> : null}
+        </summary>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="project-options" />
+          <LabeledInput label="Date" type="date" value={draft.date} onChange={(value) => onChange({ date: value })} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <LabeledInput label="Start" type="time" value={draft.start} onChange={(value) => onChange({ start: value })} />
+            <LabeledInput label="End" type="time" value={draft.end} onChange={(value) => onChange({ end: value })} />
+          </div>
+          <LabeledInput label="Location" value={draft.location} onChange={(value) => onChange({ location: value })} />
+          <LabeledInput label="Attendees" value={draft.attendees} onChange={(value) => onChange({ attendees: value })} />
         </div>
-        <LabeledInput label="Location" value={draft.location} onChange={(value) => onChange({ location: value })} />
-        <LabeledInput label="Attendees" value={draft.attendees} onChange={(value) => onChange({ attendees: value })} />
-      </div>
+      </details>
       <datalist id="project-options">
         {projects.map((project) => (
           <option key={project} value={project} />
         ))}
       </datalist>
-      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[13rem]" />
       {suggestionMessage ? (
         <SuggestionPanel
           meeting={draft}
@@ -1413,7 +1505,10 @@ function MeetingEditor({
         <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
         </button>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+        <div className="grid w-full grid-cols-1 gap-2 min-[420px]:grid-cols-3 sm:flex sm:w-auto sm:flex-wrap">
+          <button className="secondary-button" type="button" onClick={onMakeTopic} disabled={!draft.notes.trim()}>
+            Copy to topic
+          </button>
           <button className="secondary-button" type="button" onClick={onExtract}>
             Extract tasks
           </button>

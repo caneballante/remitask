@@ -48,3 +48,15 @@ create table if not exists topics (
 
 create index if not exists topics_project_idx on topics (project);
 create index if not exists topics_updated_at_idx on topics (updated_at);
+
+create table if not exists topic_pages (
+  id text primary key,
+  topic_id text not null references topics(id) on delete cascade,
+  title text not null default 'Notes',
+  notes text not null default '',
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists topic_pages_topic_id_idx on topic_pages (topic_id, sort_order);

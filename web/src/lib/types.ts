@@ -41,6 +41,15 @@ export type Topic = {
   title: string;
   project: string;
   notes: string;
+  pages: TopicPage[];
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type TopicPage = {
+  id: string;
+  title: string;
+  notes: string;
   createdAt: string;
   updatedAt?: string;
 };

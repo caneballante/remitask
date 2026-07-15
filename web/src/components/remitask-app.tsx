@@ -26,6 +26,7 @@ import type {
   TaskStatus,
   TaskSuggestion,
   Topic,
+  TopicPage,
 } from "@/lib/types";
 
 const TASK_STATUSES: TaskStatus[] = ["Inbox", "Today", "Next", "Waiting", "Scheduled", "Done", "Someday"];
@@ -47,7 +48,7 @@ const EMPTY_STATE: AppState = {
   imports: [],
 };
 
-type ActiveTab = "dashboard" | "meetings" | "tasks";
+type ActiveTab = "dashboard" | "meetings" | "tasks" | "topics";
 type TaskView = "today" | "next" | "waiting" | "projects" | "done";
 type SaveStatus = "Loaded" | "Saving..." | "Saved" | "Save failed";
 type MeetingNotesFilter = "all" | "with-notes" | "without-notes";
@@ -111,6 +112,7 @@ export function RemiTaskApp() {
   const [taskView, setTaskView] = useState<TaskView>("today");
   const [taskSearch, setTaskSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [topicSearch, setTopicSearch] = useState("");
   const [meetingDraft, setMeetingDraft] = useState<Meeting | null>(null);
   const [taskDraft, setTaskDraft] = useState<Task | null>(null);
   const [topicDraft, setTopicDraft] = useState<Topic | null>(null);
@@ -256,6 +258,15 @@ export function RemiTaskApp() {
   const allTopics = useMemo(() => {
     return [...appState.topics].sort(sortTopicsForDisplay);
   }, [appState.topics]);
+
+  const visibleTopics = useMemo(() => {
+    const search = topicSearch.trim().toLowerCase();
+    if (!search) return allTopics;
+    return allTopics.filter((topic) => {
+      const pageText = topic.pages.flatMap((page) => [page.title, page.notes]);
+      return [topic.title, topic.project, topic.notes, ...pageText].join(" ").toLowerCase().includes(search);
+    });
+  }, [allTopics, topicSearch]);
 
   const dashboardTasks = useMemo(() => {
     return appState.tasks
@@ -453,7 +464,7 @@ export function RemiTaskApp() {
   }
 
   function openTopicEditor(topic?: Topic) {
-    setTopicDraft(topic ? { ...topic } : blankTopic(projects[0] || "Inbox"));
+    setTopicDraft(topic ? { ...topic, pages: topic.pages.map((page) => ({ ...page })) } : blankTopic(projects[0] || "Inbox"));
   }
 
   function saveTaskDraft() {
@@ -510,11 +521,21 @@ export function RemiTaskApp() {
     if (!topicDraft) return;
     const now = new Date().toISOString();
     const existing = appStateRef.current.topics.find((topic) => topic.id === topicDraft.id);
+    const pages = topicDraft.pages.length
+      ? topicDraft.pages.map((page, index) => ({
+          ...page,
+          title: page.title.trim() || `Page ${index + 1}`,
+          notes: page.notes.trim(),
+          createdAt: page.createdAt || now,
+          updatedAt: page.updatedAt || now,
+        }))
+      : [blankTopicPage("Notes", topicDraft.notes)];
     const nextTopic: Topic = {
       ...topicDraft,
       title: topicDraft.title.trim(),
       project: topicDraft.project.trim() || "Inbox",
-      notes: topicDraft.notes.trim(),
+      notes: pages[0]?.notes || "",
+      pages,
       createdAt: existing?.createdAt || topicDraft.createdAt || now,
       updatedAt: now,
     };
@@ -531,7 +552,10 @@ export function RemiTaskApp() {
 
   function deleteTopic(id: string) {
     const topic = appStateRef.current.topics.find((item) => item.id === id);
-    if (!topic) return;
+    if (!topic) {
+      setTopicDraft(null);
+      return;
+    }
     if (!confirm(`Delete "${topic.title || "this topic"}"?`)) return;
     commitState((current) => ({
       ...current,
@@ -546,21 +570,25 @@ export function RemiTaskApp() {
   }
 
   function makeTaskFromTopic(topic: Topic) {
+    const page = topicPreviewPage(topic);
     setTaskDraft({
       ...blankTask(topic.project || "Inbox"),
       title: topic.title,
-      notes: topic.notes,
+      notes: page?.notes || topic.notes,
     });
   }
 
   function makeTopicFromMeeting(meeting: Meeting) {
     const source = `${formatDate(meeting.date)}${meeting.start ? ` ${formatTime(meeting.start)}` : ""}`;
     const title = meeting.title || "Meeting notes";
+    const notes = [`Source: ${source} - ${title}`, meeting.notes.trim()].filter(Boolean).join("\n\n");
+    const topic = blankTopic(meeting.project || projects[0] || "Inbox");
     setMeetingDraft(null);
     setTopicDraft({
-      ...blankTopic(meeting.project || projects[0] || "Inbox"),
+      ...topic,
       title,
-      notes: [`Source: ${source} - ${title}`, meeting.notes.trim()].filter(Boolean).join("\n\n"),
+      notes,
+      pages: [{ ...topic.pages[0], notes }],
     });
   }
 
@@ -758,6 +786,7 @@ export function RemiTaskApp() {
           ["dashboard", "Dashboard"],
           ["meetings", "Meetings"],
           ["tasks", "Tasks"],
+          ["topics", "Topics"],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -776,7 +805,8 @@ export function RemiTaskApp() {
             summaryItems={summaryItems}
             meetings={meetingsForSelectedDate}
             tasks={dashboardTasks}
-            topics={allTopics}
+            topics={allTopics.slice(0, 4)}
+            totalTopics={allTopics.length}
             expandedNotes={expandedNotes}
             expandedTopicNotes={expandedTopicNotes}
             meetingsById={meetingMap(appState.meetings)}
@@ -790,6 +820,7 @@ export function RemiTaskApp() {
             onEditTopic={openTopicEditor}
             onMakeTaskFromTopic={makeTaskFromTopic}
             onDeleteTopic={deleteTopic}
+            onViewAllTopics={() => setActiveTab("topics")}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
           />
@@ -836,6 +867,21 @@ export function RemiTaskApp() {
             onEditTask={openTaskEditor}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
+          />
+        ) : null}
+
+        {activeTab === "topics" ? (
+          <TopicsView
+            topics={visibleTopics}
+            totalTopics={allTopics.length}
+            topicSearch={topicSearch}
+            expandedTopicNotes={expandedTopicNotes}
+            onSearchChange={setTopicSearch}
+            onNewTopic={() => openTopicEditor()}
+            onToggleTopicNotes={toggleTopicNotes}
+            onEditTopic={openTopicEditor}
+            onMakeTask={makeTaskFromTopic}
+            onDeleteTopic={deleteTopic}
           />
         ) : null}
       </section>
@@ -897,6 +943,7 @@ function DashboardView({
   meetings,
   tasks,
   topics,
+  totalTopics,
   expandedNotes,
   expandedTopicNotes,
   meetingsById,
@@ -910,6 +957,7 @@ function DashboardView({
   onEditTopic,
   onMakeTaskFromTopic,
   onDeleteTopic,
+  onViewAllTopics,
   onMoveTaskToday,
   onMoveTaskWaiting,
 }: {
@@ -917,6 +965,7 @@ function DashboardView({
   meetings: Meeting[];
   tasks: Task[];
   topics: Topic[];
+  totalTopics: number;
   expandedNotes: Set<string>;
   expandedTopicNotes: Set<string>;
   meetingsById: Map<string, Meeting>;
@@ -930,6 +979,7 @@ function DashboardView({
   onEditTopic: (topic: Topic) => void;
   onMakeTaskFromTopic: (topic: Topic) => void;
   onDeleteTopic: (id: string) => void;
+  onViewAllTopics: () => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
 }) {
@@ -977,8 +1027,72 @@ function DashboardView({
             onMakeTask={onMakeTaskFromTopic}
             onDeleteTopic={onDeleteTopic}
           />
+          {totalTopics > topics.length ? (
+            <button className="secondary-button mt-3 w-full" type="button" onClick={onViewAllTopics}>
+              View all {totalTopics} topics
+            </button>
+          ) : null}
         </Panel>
       </section>
+    </div>
+  );
+}
+
+function TopicsView({
+  topics,
+  totalTopics,
+  topicSearch,
+  expandedTopicNotes,
+  onSearchChange,
+  onNewTopic,
+  onToggleTopicNotes,
+  onEditTopic,
+  onMakeTask,
+  onDeleteTopic,
+}: {
+  topics: Topic[];
+  totalTopics: number;
+  topicSearch: string;
+  expandedTopicNotes: Set<string>;
+  onSearchChange: (search: string) => void;
+  onNewTopic: () => void;
+  onToggleTopicNotes: (id: string) => void;
+  onEditTopic: (topic: Topic) => void;
+  onMakeTask: (topic: Topic) => void;
+  onDeleteTopic: (id: string) => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold">Topics</h2>
+          <p className="text-sm text-[#53635c]">
+            {topics.length} of {totalTopics} topic{totalTopics === 1 ? "" : "s"}
+          </p>
+        </div>
+        <button className="primary-button w-full sm:w-auto" type="button" onClick={onNewTopic}>
+          New topic
+        </button>
+      </div>
+      <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
+        Search topics and pages
+        <input
+          className="field"
+          type="search"
+          value={topicSearch}
+          placeholder="Search titles, projects, and notes"
+          onChange={(event) => onSearchChange(event.target.value)}
+        />
+      </label>
+      <TopicList
+        topics={topics}
+        expandedTopicNotes={expandedTopicNotes}
+        emptyText={totalTopics ? "No topics match this search." : "No topics yet."}
+        onToggleTopicNotes={onToggleTopicNotes}
+        onEditTopic={onEditTopic}
+        onMakeTask={onMakeTask}
+        onDeleteTopic={onDeleteTopic}
+      />
     </div>
   );
 }
@@ -1380,18 +1494,22 @@ function TopicList({
     <div className="grid gap-3">
       {topics.map((topic) => {
         const isExpanded = expandedTopicNotes.has(topic.id);
-        const hasMoreNotes = topic.notes && (topic.notes.length > 420 || topic.notes.split(/\r?\n/).length > 4);
+        const previewPage = topicPreviewPage(topic);
+        const previewNotes = previewPage?.notes || "";
+        const hasMoreNotes = previewNotes && (previewNotes.length > 420 || previewNotes.split(/\r?\n/).length > 4);
         return (
           <article key={topic.id} className="grid min-w-0 gap-3 rounded-lg border border-[#c5d9ee] bg-white p-4 [overflow-wrap:anywhere]">
             <div className="min-w-0">
               <h3 className="font-semibold leading-snug">{topic.title}</h3>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Tag>{topic.project || "Inbox"}</Tag>
+                <Tag>{topic.pages.length} page{topic.pages.length === 1 ? "" : "s"}</Tag>
                 <Tag tone="blue">Updated {formatDate((topic.updatedAt || topic.createdAt).slice(0, 10))}</Tag>
               </div>
-              {topic.notes ? (
+              {previewNotes ? (
                 <div className={isExpanded ? "note-preview mt-3" : "note-preview compact mt-3"}>
-                  <NotePreview text={topic.notes} maxLines={isExpanded ? Infinity : 4} />
+                  {topic.pages.length > 1 ? <p className="mb-2 text-xs font-bold uppercase text-[#53635c]">{previewPage?.title}</p> : null}
+                  <NotePreview text={previewNotes} maxLines={isExpanded ? Infinity : 4} />
                 </div>
               ) : null}
               {hasMoreNotes ? (
@@ -1597,6 +1715,34 @@ function TopicEditor({
   onSave: () => void;
   onDelete: () => void;
 }) {
+  const [activePageId, setActivePageId] = useState(draft.pages[0]?.id || "");
+  const activePage = draft.pages.find((page) => page.id === activePageId) || draft.pages[0];
+
+  function updatePages(pages: TopicPage[]) {
+    onChange({ pages, notes: pages[0]?.notes || "" });
+  }
+
+  function updateActivePage(patch: Partial<TopicPage>) {
+    if (!activePage) return;
+    const now = new Date().toISOString();
+    updatePages(draft.pages.map((page) => (page.id === activePage.id ? { ...page, ...patch, updatedAt: now } : page)));
+  }
+
+  function addPage() {
+    const page = blankTopicPage(`Page ${draft.pages.length + 1}`);
+    updatePages([...draft.pages, page]);
+    setActivePageId(page.id);
+  }
+
+  function removeActivePage() {
+    if (!activePage || draft.pages.length <= 1) return;
+    if (!confirm(`Remove "${activePage.title || "this page"}"?`)) return;
+    const activeIndex = draft.pages.findIndex((page) => page.id === activePage.id);
+    const pages = draft.pages.filter((page) => page.id !== activePage.id);
+    updatePages(pages);
+    setActivePageId(pages[Math.min(activeIndex, pages.length - 1)].id);
+  }
+
   return (
     <form
       className="grid gap-4"
@@ -1614,7 +1760,61 @@ function TopicEditor({
           <option key={project} value={project} />
         ))}
       </datalist>
-      <RichTextEditor label="Notes" value={draft.notes} onChange={(notes) => onChange({ notes })} minHeightClass="min-h-[12rem]" />
+      <div className="grid min-w-0 gap-4 border-t border-[#d9e1dd] pt-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
+        <aside className="min-w-0 border-b border-[#d9e1dd] pb-4 lg:border-r lg:border-b-0 lg:pr-4 lg:pb-0">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-[#53635c]">Pages</h3>
+            <button className="secondary-button" type="button" onClick={addPage}>
+              New page
+            </button>
+          </div>
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible">
+            {draft.pages.map((page, index) => {
+              const isActive = page.id === activePage?.id;
+              return (
+                <button
+                  key={page.id}
+                  className={`min-w-40 rounded-md border px-3 py-2 text-left text-sm lg:min-w-0 ${
+                    isActive
+                      ? "border-[#0b6b5c] bg-[#e8f4f0] text-[#12483f]"
+                      : "border-[#d9e1dd] bg-white text-[#53635c] hover:border-[#9eb9af]"
+                  }`}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => setActivePageId(page.id)}
+                >
+                  <span className="block truncate font-semibold">{page.title || `Page ${index + 1}`}</span>
+                  <span className="mt-1 block text-xs">{page.notes.trim() ? noteWordCount(page.notes) : "Empty"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+        {activePage ? (
+          <section className="grid min-w-0 content-start gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <LabeledInput label="Page title" value={activePage.title} onChange={(title) => updateActivePage({ title })} />
+              </div>
+              <button
+                className="danger-button w-full sm:w-auto"
+                type="button"
+                disabled={draft.pages.length <= 1}
+                title={draft.pages.length <= 1 ? "A topic needs at least one page" : "Remove this page"}
+                onClick={removeActivePage}
+              >
+                Remove page
+              </button>
+            </div>
+            <RichTextEditor
+              label="Page notes"
+              value={activePage.notes}
+              onChange={(notes) => updateActivePage({ notes })}
+              minHeightClass="min-h-[22rem]"
+            />
+          </section>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
@@ -2262,10 +2462,38 @@ function normalizeTask(raw: Partial<Task>): Task {
 
 function normalizeTopic(raw: Partial<Topic>): Topic {
   const now = new Date().toISOString();
+  const id = cleanText(raw.id) || createId();
+  const legacyNotes = cleanText(raw.notes);
+  const pages = Array.isArray(raw.pages)
+    ? raw.pages
+        .filter((page): page is TopicPage => Boolean(page && typeof page === "object"))
+        .map((page, index) => normalizeTopicPage(page, `Page ${index + 1}`))
+    : [];
+  const normalizedPages = pages.length
+    ? pages
+    : [{
+        id: `${id}:notes`,
+        title: "Notes",
+        notes: legacyNotes,
+        createdAt: cleanText(raw.createdAt) || now,
+        updatedAt: cleanText(raw.updatedAt) || cleanText(raw.createdAt) || now,
+      }];
   return {
-    id: cleanText(raw.id) || createId(),
+    id,
     title: cleanText(raw.title),
     project: cleanText(raw.project) || "Inbox",
+    notes: normalizedPages[0]?.notes || legacyNotes,
+    pages: normalizedPages,
+    createdAt: cleanText(raw.createdAt) || now,
+    updatedAt: cleanText(raw.updatedAt) || cleanText(raw.createdAt) || now,
+  };
+}
+
+function normalizeTopicPage(raw: Partial<TopicPage>, fallbackTitle: string): TopicPage {
+  const now = new Date().toISOString();
+  return {
+    id: cleanText(raw.id) || createId(),
+    title: cleanText(raw.title) || fallbackTitle,
     notes: cleanText(raw.notes),
     createdAt: cleanText(raw.createdAt) || now,
     updatedAt: cleanText(raw.updatedAt) || cleanText(raw.createdAt) || now,
@@ -2311,11 +2539,24 @@ function blankTask(project: string): Task {
 
 function blankTopic(project: string): Topic {
   const now = new Date().toISOString();
+  const page = blankTopicPage("Notes");
   return {
     id: createId(),
     title: "",
     project,
     notes: "",
+    pages: [page],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function blankTopicPage(title: string, notes = ""): TopicPage {
+  const now = new Date().toISOString();
+  return {
+    id: createId(),
+    title,
+    notes,
     createdAt: now,
     updatedAt: now,
   };
@@ -2513,6 +2754,18 @@ function sortTasksForDisplay(left: Task, right: Task) {
 
 function sortTopicsForDisplay(left: Topic, right: Topic) {
   return (right.updatedAt || right.createdAt || "").localeCompare(left.updatedAt || left.createdAt || "");
+}
+
+function topicPreviewPage(topic: Topic) {
+  const pagesWithNotes = topic.pages.filter((page) => page.notes.trim());
+  return [...pagesWithNotes].sort((left, right) =>
+    (right.updatedAt || right.createdAt || "").localeCompare(left.updatedAt || left.createdAt || ""),
+  )[0] || topic.pages[0];
+}
+
+function noteWordCount(notes: string) {
+  const count = notes.trim() ? notes.trim().split(/\s+/).length : 0;
+  return `${count} word${count === 1 ? "" : "s"}`;
 }
 
 function priorityBorder(priority: TaskPriority) {

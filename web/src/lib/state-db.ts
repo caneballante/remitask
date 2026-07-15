@@ -1,5 +1,5 @@
 import { getSql } from "@/lib/db";
-import type { AppState, Meeting, Task, Topic } from "@/lib/types";
+import type { AppState, Meeting, Task, Topic, TopicPage } from "@/lib/types";
 
 type MeetingRow = {
   id: string;
@@ -42,11 +42,21 @@ type TopicRow = {
   updated_at: DateValue;
 };
 
+type TopicPageRow = {
+  id: string;
+  topic_id: string;
+  title: string;
+  notes: string;
+  sort_order: number;
+  created_at: DateValue;
+  updated_at: DateValue;
+};
+
 type DateValue = string | Date | null;
 
 export async function loadState(): Promise<AppState> {
   const sql = getSql();
-  await ensureTopicsTable();
+  await ensureTopicTables();
   const meetingRowsPromise = sql`
     select id, calendar_uid, title, project, date, start_time, end_time, location,
            attendees, notes, created_at, updated_at
@@ -64,16 +74,23 @@ export async function loadState(): Promise<AppState> {
     from topics
     order by updated_at desc, created_at desc, title
   ` as unknown as Promise<TopicRow[]>;
-  const [meetingRows, taskRows, topicRows] = await Promise.all([
+  const topicPageRowsPromise = sql`
+    select id, topic_id, title, notes, sort_order, created_at, updated_at
+    from topic_pages
+    order by topic_id, sort_order, created_at, id
+  ` as unknown as Promise<TopicPageRow[]>;
+  const [meetingRows, taskRows, topicRows, topicPageRows] = await Promise.all([
     meetingRowsPromise,
     taskRowsPromise,
     topicRowsPromise,
+    topicPageRowsPromise,
   ]);
+  const pagesByTopic = groupTopicPages(topicPageRows);
 
   return {
     meetings: meetingRows.map(meetingFromRow),
     tasks: taskRows.map(taskFromRow),
-    topics: topicRows.map(topicFromRow),
+    topics: topicRows.map((topic) => topicFromRow(topic, pagesByTopic.get(topic.id) || [])),
     notes: [],
     imports: [],
   };
@@ -81,12 +98,16 @@ export async function loadState(): Promise<AppState> {
 
 export async function saveState(state: AppState): Promise<AppState> {
   const sql = getSql();
-  await ensureTopicsTable();
+  await ensureTopicTables();
   const meetings = Array.isArray(state.meetings) ? state.meetings : [];
   const tasks = Array.isArray(state.tasks) ? state.tasks : [];
   const topics = Array.isArray(state.topics) ? state.topics : [];
+  const topicPages = topics.flatMap((topic) =>
+    pagesForTopic(topic).map((page, sortOrder) => ({ topicId: topic.id, page, sortOrder })),
+  );
 
   await sql.transaction([
+    sql`delete from topic_pages`,
     sql`delete from topics`,
     sql`delete from tasks`,
     sql`delete from meetings`,
@@ -142,6 +163,19 @@ export async function saveState(state: AppState): Promise<AppState> {
         ${topic.updatedAt || new Date().toISOString()}
       )
     `),
+    ...topicPages.map(({ topicId, page, sortOrder }) => sql`
+      insert into topic_pages (
+        id, topic_id, title, notes, sort_order, created_at, updated_at
+      ) values (
+        ${page.id},
+        ${topicId},
+        ${page.title || "Notes"},
+        ${page.notes || ""},
+        ${sortOrder},
+        ${page.createdAt || new Date().toISOString()},
+        ${page.updatedAt || new Date().toISOString()}
+      )
+    `),
   ]);
 
   return loadState();
@@ -183,18 +217,26 @@ function taskFromRow(row: TaskRow): Task {
   };
 }
 
-function topicFromRow(row: TopicRow): Topic {
+function topicFromRow(row: TopicRow, pages: TopicPage[]): Topic {
+  const fallbackPage: TopicPage = {
+    id: `${row.id}:notes`,
+    title: "Notes",
+    notes: row.notes,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
   return {
     id: row.id,
     title: row.title,
     project: row.project,
     notes: row.notes,
+    pages: pages.length ? pages : [fallbackPage],
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
 }
 
-async function ensureTopicsTable() {
+async function ensureTopicTables() {
   const sql = getSql();
   await sql`
     create table if not exists topics (
@@ -208,6 +250,47 @@ async function ensureTopicsTable() {
   `;
   await sql`create index if not exists topics_project_idx on topics (project)`;
   await sql`create index if not exists topics_updated_at_idx on topics (updated_at)`;
+  await sql`
+    create table if not exists topic_pages (
+      id text primary key,
+      topic_id text not null references topics(id) on delete cascade,
+      title text not null default 'Notes',
+      notes text not null default '',
+      sort_order integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists topic_pages_topic_id_idx on topic_pages (topic_id, sort_order)`;
+}
+
+function groupTopicPages(rows: TopicPageRow[]) {
+  const grouped = new Map<string, TopicPage[]>();
+  rows.forEach((row) => {
+    const pages = grouped.get(row.topic_id) || [];
+    pages.push({
+      id: row.id,
+      title: row.title,
+      notes: row.notes,
+      createdAt: toIso(row.created_at),
+      updatedAt: toIso(row.updated_at),
+    });
+    grouped.set(row.topic_id, pages);
+  });
+  return grouped;
+}
+
+function pagesForTopic(topic: Topic): TopicPage[] {
+  if (Array.isArray(topic.pages) && topic.pages.length) return topic.pages;
+  return [
+    {
+      id: `${topic.id}:notes`,
+      title: "Notes",
+      notes: topic.notes || "",
+      createdAt: topic.createdAt || new Date().toISOString(),
+      updatedAt: topic.updatedAt || new Date().toISOString(),
+    },
+  ];
 }
 
 function toIso(value: DateValue) {

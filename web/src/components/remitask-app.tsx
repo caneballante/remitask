@@ -127,6 +127,9 @@ export function RemiTaskApp() {
   const appStateRef = useRef(appState);
   const saveQueueRef = useRef(Promise.resolve());
   const saveGenerationRef = useRef(0);
+  const meetingDraftBaselineRef = useRef("");
+  const taskDraftBaselineRef = useRef("");
+  const topicDraftBaselineRef = useRef("");
 
   useEffect(() => {
     async function checkSession() {
@@ -337,10 +340,14 @@ export function RemiTaskApp() {
   }
 
   function openMeetingEditor(meeting?: Meeting) {
-    setMeetingDraft(meeting ? { ...meeting } : blankMeeting(selectedDate));
+    const draft = meeting ? { ...meeting } : blankMeeting(selectedDate);
+    meetingDraftBaselineRef.current = draftSnapshot(draft);
+    setMeetingDraft(draft);
   }
 
   function closeMeetingEditor() {
+    if (!meetingDraft || !confirmDiscardChanges(meetingDraft, meetingDraftBaselineRef.current)) return;
+    meetingDraftBaselineRef.current = "";
     setMeetingDraft(null);
   }
 
@@ -365,8 +372,13 @@ export function RemiTaskApp() {
         ? current.meetings.map((meeting) => (meeting.id === savedMeeting.id ? savedMeeting : meeting))
         : [savedMeeting, ...current.meetings],
     }));
-    setMeetingDraft(savedMeeting);
-    if (options.close !== false) setMeetingDraft(null);
+    if (options.close === false) {
+      meetingDraftBaselineRef.current = draftSnapshot(savedMeeting);
+      setMeetingDraft(savedMeeting);
+    } else {
+      meetingDraftBaselineRef.current = "";
+      setMeetingDraft(null);
+    }
     return savedMeeting;
   }
 
@@ -382,7 +394,10 @@ export function RemiTaskApp() {
       meetings: current.meetings.filter((item) => item.id !== id),
       tasks: current.tasks.map((task) => (task.meetingId === id ? { ...task, meetingId: "" } : task)),
     }));
-    if (meetingDraft?.id === id) setMeetingDraft(null);
+    if (meetingDraft?.id === id) {
+      meetingDraftBaselineRef.current = "";
+      setMeetingDraft(null);
+    }
     if (suggestionMeeting?.id === id) {
       setSuggestions([]);
       setSuggestionMeeting(null);
@@ -459,12 +474,28 @@ export function RemiTaskApp() {
     setSuggestionMessage(`Added ${newTasks.length} task${newTasks.length === 1 ? "" : "s"}.`);
   }
 
-  function openTaskEditor(task?: Task) {
-    setTaskDraft(task ? { ...task } : blankTask(projects[0] || "Inbox"));
+  function openTaskEditor(task?: Task, project?: string) {
+    const draft = task ? { ...task } : blankTask(project || projects[0] || "Inbox");
+    taskDraftBaselineRef.current = draftSnapshot(draft);
+    setTaskDraft(draft);
   }
 
   function openTopicEditor(topic?: Topic) {
-    setTopicDraft(topic ? { ...topic, pages: topic.pages.map((page) => ({ ...page })) } : blankTopic(projects[0] || "Inbox"));
+    const draft = topic ? { ...topic, pages: topic.pages.map((page) => ({ ...page })) } : blankTopic(projects[0] || "Inbox");
+    topicDraftBaselineRef.current = draftSnapshot(draft);
+    setTopicDraft(draft);
+  }
+
+  function closeTaskEditor() {
+    if (!taskDraft || !confirmDiscardChanges(taskDraft, taskDraftBaselineRef.current)) return;
+    taskDraftBaselineRef.current = "";
+    setTaskDraft(null);
+  }
+
+  function closeTopicEditor() {
+    if (!topicDraft || !confirmDiscardChanges(topicDraft, topicDraftBaselineRef.current)) return;
+    topicDraftBaselineRef.current = "";
+    setTopicDraft(null);
   }
 
   function saveTaskDraft() {
@@ -488,6 +519,7 @@ export function RemiTaskApp() {
         ? current.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
         : [nextTask, ...current.tasks],
     }));
+    taskDraftBaselineRef.current = "";
     setTaskDraft(null);
   }
 
@@ -499,6 +531,7 @@ export function RemiTaskApp() {
       ...current,
       tasks: current.tasks.filter((item) => item.id !== id),
     }));
+    taskDraftBaselineRef.current = "";
     setTaskDraft(null);
   }
 
@@ -547,12 +580,14 @@ export function RemiTaskApp() {
         ? current.topics.map((topic) => (topic.id === nextTopic.id ? nextTopic : topic))
         : [nextTopic, ...current.topics],
     }));
+    topicDraftBaselineRef.current = "";
     setTopicDraft(null);
   }
 
   function deleteTopic(id: string) {
     const topic = appStateRef.current.topics.find((item) => item.id === id);
     if (!topic) {
+      topicDraftBaselineRef.current = "";
       setTopicDraft(null);
       return;
     }
@@ -566,13 +601,16 @@ export function RemiTaskApp() {
       next.delete(id);
       return next;
     });
+    topicDraftBaselineRef.current = "";
     setTopicDraft(null);
   }
 
   function makeTaskFromTopic(topic: Topic) {
     const page = topicPreviewPage(topic);
+    const blankDraft = blankTask(topic.project || "Inbox");
+    taskDraftBaselineRef.current = draftSnapshot(blankDraft);
     setTaskDraft({
-      ...blankTask(topic.project || "Inbox"),
+      ...blankDraft,
       title: topic.title,
       notes: page?.notes || topic.notes,
     });
@@ -583,7 +621,9 @@ export function RemiTaskApp() {
     const title = meeting.title || "Meeting notes";
     const notes = [`Source: ${source} - ${title}`, meeting.notes.trim()].filter(Boolean).join("\n\n");
     const topic = blankTopic(meeting.project || projects[0] || "Inbox");
+    meetingDraftBaselineRef.current = "";
     setMeetingDraft(null);
+    topicDraftBaselineRef.current = draftSnapshot(topic);
     setTopicDraft({
       ...topic,
       title,
@@ -865,6 +905,7 @@ export function RemiTaskApp() {
             onTaskViewChange={setTaskView}
             onToggleTaskDone={toggleTaskDone}
             onEditTask={openTaskEditor}
+            onAddTask={(project) => openTaskEditor(undefined, project)}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
           />
@@ -911,7 +952,7 @@ export function RemiTaskApp() {
       ) : null}
 
       {taskDraft ? (
-        <Modal title={taskDraft.title || "Task"} onClose={() => setTaskDraft(null)}>
+        <Modal title={taskDraft.title || "Task"} onClose={closeTaskEditor}>
           <TaskEditor
             draft={taskDraft}
             projects={projects}
@@ -924,7 +965,7 @@ export function RemiTaskApp() {
       ) : null}
 
       {topicDraft ? (
-        <Modal title={topicDraft.title || "Topic"} onClose={() => setTopicDraft(null)}>
+        <Modal title={topicDraft.title || "Topic"} onClose={closeTopicEditor}>
           <TopicEditor
             draft={topicDraft}
             projects={projects}
@@ -1212,6 +1253,7 @@ function TasksView({
   onTaskViewChange,
   onToggleTaskDone,
   onEditTask,
+  onAddTask,
   onMoveTaskToday,
   onMoveTaskWaiting,
 }: {
@@ -1226,6 +1268,7 @@ function TasksView({
   onTaskViewChange: (view: TaskView) => void;
   onToggleTaskDone: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onAddTask: (project: string) => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
 }) {
@@ -1276,7 +1319,15 @@ function TasksView({
         <div className="grid gap-4">
           {groupedTasks.length ? (
             groupedTasks.map(([project, projectTasks]) => (
-              <Panel key={project} title={project}>
+              <Panel
+                key={project}
+                title={project}
+                action={
+                  <button className="secondary-button" type="button" onClick={() => onAddTask(project)}>
+                    Add task
+                  </button>
+                }
+              >
                 <TaskList
                   tasks={projectTasks}
                   meetingsById={meetingsById}
@@ -1954,10 +2005,23 @@ function InlineNoteText({ text }: { text: string }) {
   );
 }
 
-function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+function Panel({
+  title,
+  children,
+  action,
+  className = "",
+}: {
+  title: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+  className?: string;
+}) {
   return (
     <section className={`min-w-0 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 ${className}`}>
-      <h2 className="mb-4 text-lg font-semibold">{title}</h2>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
       {children}
     </section>
   );
@@ -2560,6 +2624,14 @@ function blankTopicPage(title: string, notes = ""): TopicPage {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function draftSnapshot(draft: Meeting | Task | Topic) {
+  return JSON.stringify(draft);
+}
+
+function confirmDiscardChanges(draft: Meeting | Task | Topic, baseline: string) {
+  return draftSnapshot(draft) === baseline || confirm("You have unsaved changes. Close without saving?");
 }
 
 function normalizeSuggestion(suggestion: Partial<TaskSuggestion>, meeting: Meeting): TaskSuggestion {

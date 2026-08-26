@@ -8,10 +8,7 @@ Create `web/.env.local`:
 
 ```text
 DATABASE_URL=postgresql://user:password@host.neon.tech/dbname?sslmode=require
-OPENAI_API_KEY=sk-your-api-key-here
 APP_PASSWORD=choose-a-private-app-password
-# Optional:
-# OPENAI_MODEL=gpt-4o-mini
 ```
 
 Run the database migration:
@@ -50,4 +47,4 @@ npm run build
 - JSON import/export for migration and backups
 - Task views for Today, Next, Waiting, Projects, and Done
 - Completed tasks stay visible on the dashboard for the day they were checked off
-- OpenAI task extraction with local fallback in the client
+- Verbatim task pulling from meeting-note lines marked with the Task formatting control

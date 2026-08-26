@@ -28,6 +28,7 @@ import type {
   Topic,
   TopicPage,
 } from "@/lib/types";
+import { extractMarkedTaskTitles, markedTaskTitle } from "@/lib/task-markers";
 
 const TASK_STATUSES: TaskStatus[] = ["Inbox", "Today", "Next", "Waiting", "Scheduled", "Done", "Someday"];
 const TASK_PRIORITIES: TaskPriority[] = ["P1", "P2", "P3"];
@@ -52,6 +53,7 @@ type ActiveTab = "dashboard" | "meetings" | "tasks" | "topics";
 type TaskView = "today" | "next" | "waiting" | "projects" | "done";
 type SaveStatus = "Loaded" | "Saving..." | "Saved" | "Save failed";
 type MeetingNotesFilter = "all" | "with-notes" | "without-notes";
+type MeetingAgeFilter = "recent" | "all";
 type SessionState = {
   checked: boolean;
   authenticated: boolean;
@@ -109,6 +111,7 @@ export function RemiTaskApp() {
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [meetingSearch, setMeetingSearch] = useState("");
   const [meetingNotesFilter, setMeetingNotesFilter] = useState<MeetingNotesFilter>("all");
+  const [meetingAgeFilter, setMeetingAgeFilter] = useState<MeetingAgeFilter>("recent");
   const [taskView, setTaskView] = useState<TaskView>("today");
   const [taskSearch, setTaskSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
@@ -120,8 +123,7 @@ export function RemiTaskApp() {
   const [expandedTopicNotes, setExpandedTopicNotes] = useState<Set<string>>(() => new Set());
   const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([]);
   const [suggestionMeeting, setSuggestionMeeting] = useState<Meeting | null>(null);
-  const [suggestionMessage, setSuggestionMessage] = useState("No suggestions yet.");
-  const [isExtracting, setIsExtracting] = useState(false);
+  const [suggestionMessage, setSuggestionMessage] = useState("");
   const [icsStatus, setIcsStatus] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const appStateRef = useRef(appState);
@@ -130,6 +132,7 @@ export function RemiTaskApp() {
   const meetingDraftBaselineRef = useRef("");
   const taskDraftBaselineRef = useRef("");
   const topicDraftBaselineRef = useRef("");
+  const suggestionBaselineRef = useRef("");
 
   useEffect(() => {
     async function checkSession() {
@@ -246,9 +249,11 @@ export function RemiTaskApp() {
     return [...appState.meetings].sort((left, right) => meetingDateTime(right).localeCompare(meetingDateTime(left)));
   }, [appState.meetings]);
 
+  const meetingRecencyCutoff = recentMeetingCutoff();
   const visibleMeetings = useMemo(() => {
     const search = meetingSearch.trim().toLowerCase();
     return allMeetings.filter((meeting) => {
+      if (meetingAgeFilter === "recent" && meeting.date < meetingRecencyCutoff) return false;
       const hasNotes = Boolean(meeting.notes.trim());
       if (meetingNotesFilter === "with-notes" && !hasNotes) return false;
       if (meetingNotesFilter === "without-notes" && hasNotes) return false;
@@ -256,7 +261,7 @@ export function RemiTaskApp() {
       const haystack = [meeting.title, meeting.project, meeting.date, meeting.location, meeting.attendees, meeting.notes].join(" ").toLowerCase();
       return haystack.includes(search);
     });
-  }, [allMeetings, meetingNotesFilter, meetingSearch]);
+  }, [allMeetings, meetingAgeFilter, meetingNotesFilter, meetingRecencyCutoff, meetingSearch]);
 
   const allTopics = useMemo(() => {
     return [...appState.topics].sort(sortTopicsForDisplay);
@@ -284,7 +289,7 @@ export function RemiTaskApp() {
     const search = taskSearch.trim().toLowerCase();
     return appState.tasks
       .filter((task) => {
-        const haystack = [task.title, task.project, task.notes, task.owner].join(" ").toLowerCase();
+        const haystack = [task.title, task.project, task.notes].join(" ").toLowerCase();
         if (search && !haystack.includes(search)) return false;
         if (projectFilter && task.project !== projectFilter) return false;
         if (taskView === "today") return task.status === "Today";
@@ -401,57 +406,76 @@ export function RemiTaskApp() {
     if (suggestionMeeting?.id === id) {
       setSuggestions([]);
       setSuggestionMeeting(null);
-      setSuggestionMessage("No suggestions yet.");
+      setSuggestionMessage("");
+      suggestionBaselineRef.current = "";
     }
   }
 
-  async function extractForMeeting(meeting: Meeting, options: { revealMeetingsTab?: boolean } = {}) {
+  function pullTasksForMeeting(meeting: Meeting, options: { revealMeetingsTab?: boolean } = {}) {
     const savedMeeting = appStateRef.current.meetings.find((item) => item.id === meeting.id) || meeting;
     if (options.revealMeetingsTab !== false) {
       setActiveTab("meetings");
     }
+
+    const existingTitles = new Set(
+      appStateRef.current.tasks
+        .filter((task) => task.meetingId === savedMeeting.id)
+        .map((task) => task.title.trim()),
+    );
+    const pulledTasks = extractMarkedTaskTitles(savedMeeting.notes)
+      .filter((title) => !existingTitles.has(title.trim()))
+      .map((title): TaskSuggestion => ({
+        selected: true,
+        title,
+        project: savedMeeting.project || "Inbox",
+        status: "Next",
+        priority: "P2",
+        effort: "Quick",
+        energy: "Normal",
+        context: "Follow-up",
+        owner: "",
+        due: "",
+        meetingId: savedMeeting.id,
+        notes: `Source: ${formatDate(savedMeeting.date)} ${savedMeeting.title}`,
+      }));
+
     setSuggestionMeeting(savedMeeting);
-    setSuggestions([]);
-    setSuggestionMessage("Extracting tasks...");
-    setIsExtracting(true);
+    setSuggestions(pulledTasks);
+    suggestionBaselineRef.current = JSON.stringify(pulledTasks);
+    setSuggestionMessage(
+      pulledTasks.length
+        ? "Review the marked task lines, then create them together."
+        : "No new marked tasks found. In the meeting notes, put the cursor on a line and choose Task, then try again.",
+    );
+  }
 
-    try {
-      const response = await fetch("/api/extract-tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting: savedMeeting, projects }),
-      });
-      if (!response.ok) throw new Error("AI extraction unavailable.");
-      const body = (await response.json()) as { tasks?: TaskSuggestion[] };
-      const remoteSuggestions = Array.isArray(body.tasks) ? body.tasks : [];
-      setSuggestions(remoteSuggestions.map((suggestion) => normalizeSuggestion(suggestion, savedMeeting)));
-      setSuggestionMessage("AI found no tasks in these notes.");
-    } catch {
-      const localSuggestions = extractSuggestionsLocally(savedMeeting);
-      setSuggestions(localSuggestions);
-      setSuggestionMessage(
-        localSuggestions.length
-          ? "AI extraction is unavailable, so these suggestions came from the local fallback."
-          : "AI extraction is unavailable, and the fallback found no task-like lines.",
-      );
-    } finally {
-      setIsExtracting(false);
+  function saveDraftAndPullTasks() {
+    const savedMeeting = saveMeetingDraft();
+    if (savedMeeting) pullTasksForMeeting(savedMeeting, { revealMeetingsTab: false });
+  }
+
+  function closeBulkTaskEditor() {
+    if (
+      suggestionBaselineRef.current &&
+      JSON.stringify(suggestions) !== suggestionBaselineRef.current &&
+      !confirm("Discard changes to these pulled tasks?")
+    ) {
+      return;
     }
+    suggestionBaselineRef.current = "";
+    setSuggestions([]);
+    setSuggestionMeeting(null);
+    setSuggestionMessage("");
   }
 
-  async function saveDraftAndExtract() {
-    const savedMeeting = saveMeetingDraft({ close: false });
-    if (savedMeeting) await extractForMeeting(savedMeeting, { revealMeetingsTab: false });
-  }
-
-  function addSelectedSuggestions() {
+  function addBulkTasks() {
     const now = new Date().toISOString();
     const newTasks: Task[] = suggestions
-      .filter((suggestion) => suggestion.selected && suggestion.title.trim())
+      .filter((suggestion) => suggestion.title.trim())
       .map((suggestion) => ({
         id: createId(),
         title: suggestion.title.trim(),
-        project: suggestion.project,
+        project: suggestion.project.trim() || "Inbox",
         status: suggestion.status,
         priority: suggestion.priority,
         effort: suggestion.effort,
@@ -470,8 +494,10 @@ export function RemiTaskApp() {
       ...current,
       tasks: [...newTasks, ...current.tasks],
     }));
+    suggestionBaselineRef.current = "";
     setSuggestions([]);
-    setSuggestionMessage(`Added ${newTasks.length} task${newTasks.length === 1 ? "" : "s"}.`);
+    setSuggestionMeeting(null);
+    setSuggestionMessage("");
   }
 
   function openTaskEditor(task?: Task, project?: string) {
@@ -849,11 +875,10 @@ export function RemiTaskApp() {
             totalTopics={allTopics.length}
             expandedNotes={expandedNotes}
             expandedTopicNotes={expandedTopicNotes}
-            meetingsById={meetingMap(appState.meetings)}
             onToggleNotes={toggleNotes}
             onToggleTopicNotes={toggleTopicNotes}
             onEditMeeting={openMeetingEditor}
-            onExtractMeeting={extractForMeeting}
+            onExtractMeeting={pullTasksForMeeting}
             onDeleteMeeting={deleteMeeting}
             onToggleTaskDone={toggleTaskDone}
             onEditTask={openTaskEditor}
@@ -871,31 +896,23 @@ export function RemiTaskApp() {
             meetings={visibleMeetings}
             totalMeetings={allMeetings.length}
             expandedNotes={expandedNotes}
-            suggestions={suggestions}
-            suggestionMeeting={suggestionMeeting}
-            suggestionMessage={suggestionMessage}
-            isExtracting={isExtracting}
-            projects={projects}
             meetingSearch={meetingSearch}
             meetingNotesFilter={meetingNotesFilter}
+            meetingAgeFilter={meetingAgeFilter}
             onSearchChange={setMeetingSearch}
             onNotesFilterChange={setMeetingNotesFilter}
+            onAgeFilterChange={setMeetingAgeFilter}
             onNewMeeting={() => openMeetingEditor()}
             onToggleNotes={toggleNotes}
             onEditMeeting={openMeetingEditor}
-            onExtractMeeting={extractForMeeting}
+            onExtractMeeting={pullTasksForMeeting}
             onDeleteMeeting={deleteMeeting}
-            onSuggestionChange={(index, patch) =>
-              setSuggestions((current) => current.map((suggestion, itemIndex) => (itemIndex === index ? { ...suggestion, ...patch } : suggestion)))
-            }
-            onAddSuggestions={addSelectedSuggestions}
           />
         ) : null}
 
         {activeTab === "tasks" ? (
           <TasksView
             tasks={visibleTasks}
-            allMeetings={appState.meetings}
             projects={projects}
             projectFilter={projectFilter}
             taskSearch={taskSearch}
@@ -932,34 +949,49 @@ export function RemiTaskApp() {
           <MeetingEditor
             draft={meetingDraft}
             projects={projects}
-            suggestions={suggestionMeeting?.id === meetingDraft.id ? suggestions : []}
-            suggestionMessage={suggestionMeeting?.id === meetingDraft.id ? suggestionMessage : ""}
-            isExtracting={isExtracting}
             onChange={(patch) => setMeetingDraft((current) => (current ? { ...current, ...patch } : current))}
             onSave={() => saveMeetingDraft()}
             onDelete={() => deleteMeeting(meetingDraft.id)}
-            onExtract={saveDraftAndExtract}
+            onPullTasks={saveDraftAndPullTasks}
             onMakeTopic={() => {
               const savedMeeting = saveMeetingDraft({ close: false });
               if (savedMeeting) makeTopicFromMeeting(savedMeeting);
             }}
-            onSuggestionChange={(index, patch) =>
-              setSuggestions((current) => current.map((suggestion, itemIndex) => (itemIndex === index ? { ...suggestion, ...patch } : suggestion)))
-            }
-            onAddSuggestions={addSelectedSuggestions}
           />
         </Modal>
       ) : null}
 
       {taskDraft ? (
-        <Modal title={taskDraft.title || "Task"} onClose={closeTaskEditor}>
+        <Modal
+          title={taskDraft.title || "Task"}
+          onClose={closeTaskEditor}
+          headerActions={
+            <button className="primary-button" type="button" onClick={saveTaskDraft} disabled={!taskDraft.title.trim()}>
+              Save and close
+            </button>
+          }
+        >
           <TaskEditor
             draft={taskDraft}
             projects={projects}
-            meetings={appState.meetings}
             onChange={(patch) => setTaskDraft((current) => (current ? { ...current, ...patch } : current))}
             onSave={saveTaskDraft}
             onDelete={() => deleteTask(taskDraft.id)}
+          />
+        </Modal>
+      ) : null}
+
+      {suggestionMeeting ? (
+        <Modal title={`Pull tasks from ${suggestionMeeting.title}`} onClose={closeBulkTaskEditor}>
+          <BulkTaskEditor
+            suggestions={suggestions}
+            message={suggestionMessage}
+            projects={projects}
+            onChange={(index, patch) =>
+              setSuggestions((current) => current.map((suggestion, itemIndex) => (itemIndex === index ? { ...suggestion, ...patch } : suggestion)))
+            }
+            onRemove={(index) => setSuggestions((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+            onSave={addBulkTasks}
           />
         </Modal>
       ) : null}
@@ -987,7 +1019,6 @@ function DashboardView({
   totalTopics,
   expandedNotes,
   expandedTopicNotes,
-  meetingsById,
   onToggleNotes,
   onToggleTopicNotes,
   onEditMeeting,
@@ -1009,7 +1040,6 @@ function DashboardView({
   totalTopics: number;
   expandedNotes: Set<string>;
   expandedTopicNotes: Set<string>;
-  meetingsById: Map<string, Meeting>;
   onToggleNotes: (id: string) => void;
   onToggleTopicNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
@@ -1050,7 +1080,6 @@ function DashboardView({
         <Panel title="Today">
           <TaskList
             tasks={tasks}
-            meetingsById={meetingsById}
             emptyText="No Today tasks yet."
             onToggleTaskDone={onToggleTaskDone}
             onEditTask={onEditTask}
@@ -1142,42 +1171,32 @@ function MeetingsView({
   meetings,
   totalMeetings,
   expandedNotes,
-  suggestions,
-  suggestionMeeting,
-  suggestionMessage,
-  isExtracting,
-  projects,
   meetingSearch,
   meetingNotesFilter,
+  meetingAgeFilter,
   onSearchChange,
   onNotesFilterChange,
+  onAgeFilterChange,
   onNewMeeting,
   onToggleNotes,
   onEditMeeting,
   onExtractMeeting,
   onDeleteMeeting,
-  onSuggestionChange,
-  onAddSuggestions,
 }: {
   meetings: Meeting[];
   totalMeetings: number;
   expandedNotes: Set<string>;
-  suggestions: TaskSuggestion[];
-  suggestionMeeting: Meeting | null;
-  suggestionMessage: string;
-  isExtracting: boolean;
-  projects: string[];
   meetingSearch: string;
   meetingNotesFilter: MeetingNotesFilter;
+  meetingAgeFilter: MeetingAgeFilter;
   onSearchChange: (search: string) => void;
   onNotesFilterChange: (filter: MeetingNotesFilter) => void;
+  onAgeFilterChange: (filter: MeetingAgeFilter) => void;
   onNewMeeting: () => void;
   onToggleNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
   onExtractMeeting: (meeting: Meeting) => void;
   onDeleteMeeting: (id: string) => void;
-  onSuggestionChange: (index: number, patch: Partial<TaskSuggestion>) => void;
-  onAddSuggestions: () => void;
 }) {
   return (
     <div className="grid gap-4">
@@ -1190,18 +1209,7 @@ function MeetingsView({
           New meeting
         </button>
       </div>
-      {suggestionMeeting ? (
-        <SuggestionPanel
-          meeting={suggestionMeeting}
-          suggestions={suggestions}
-          message={suggestionMessage}
-          projects={projects}
-          isExtracting={isExtracting}
-          onChange={onSuggestionChange}
-          onAdd={onAddSuggestions}
-        />
-      ) : null}
-      <section className="grid min-w-0 gap-3 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-center">
+      <section className="grid min-w-0 gap-3 rounded-lg border border-[#d9e1dd] bg-white p-3 shadow-sm sm:p-4 xl:grid-cols-[minmax(220px,1fr)_auto_auto] xl:items-center">
         <input
           className="field"
           type="search"
@@ -1209,6 +1217,21 @@ function MeetingsView({
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Search meeting notes"
         />
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+          {[
+            ["recent", "Recent 30 days"],
+            ["all", "All history"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className={meetingAgeFilter === id ? "small-tab active" : "small-tab"}
+              type="button"
+              onClick={() => onAgeFilterChange(id as MeetingAgeFilter)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
           {[
             ["all", "All"],
@@ -1231,6 +1254,7 @@ function MeetingsView({
           meetings={meetings}
           expandedNotes={expandedNotes}
           emptyText={totalMeetings ? "No meetings match these filters." : "No meetings yet."}
+          showDayHeaders
           onToggleNotes={onToggleNotes}
           onEditMeeting={onEditMeeting}
           onExtractMeeting={onExtractMeeting}
@@ -1243,7 +1267,6 @@ function MeetingsView({
 
 function TasksView({
   tasks,
-  allMeetings,
   projects,
   projectFilter,
   taskSearch,
@@ -1258,7 +1281,6 @@ function TasksView({
   onMoveTaskWaiting,
 }: {
   tasks: Task[];
-  allMeetings: Meeting[];
   projects: string[];
   projectFilter: string;
   taskSearch: string;
@@ -1272,7 +1294,6 @@ function TasksView({
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
 }) {
-  const meetingsById = meetingMap(allMeetings);
   const groupedTasks = groupTasksByProject(tasks);
 
   return (
@@ -1330,7 +1351,6 @@ function TasksView({
               >
                 <TaskList
                   tasks={projectTasks}
-                  meetingsById={meetingsById}
                   emptyText="Nothing in this project."
                   onToggleTaskDone={onToggleTaskDone}
                   onEditTask={onEditTask}
@@ -1347,7 +1367,6 @@ function TasksView({
         <Panel title="Tasks">
           <TaskList
             tasks={tasks}
-            meetingsById={meetingsById}
             emptyText="Nothing in this view."
             onToggleTaskDone={onToggleTaskDone}
             onEditTask={onEditTask}
@@ -1365,6 +1384,7 @@ function MeetingList({
   expandedNotes,
   emptyText,
   density = "spacious",
+  showDayHeaders = false,
   onToggleNotes,
   onEditMeeting,
   onExtractMeeting,
@@ -1374,6 +1394,7 @@ function MeetingList({
   expandedNotes: Set<string>;
   emptyText: string;
   density?: "compact" | "spacious";
+  showDayHeaders?: boolean;
   onToggleNotes: (id: string) => void;
   onEditMeeting: (meeting: Meeting) => void;
   onExtractMeeting: (meeting: Meeting) => void;
@@ -1382,68 +1403,143 @@ function MeetingList({
   if (!meetings.length) return <EmptyState text={emptyText} />;
   const dayToneByDate = meetingDayToneMap(meetings);
 
+  if (showDayHeaders) {
+    return (
+      <div className="grid gap-6">
+        {groupMeetingsByDate(meetings).map(([date, dayMeetings]) => {
+          const dayHeading = formatMeetingDayHeading(date);
+
+          return (
+            <section key={date} className="grid gap-3">
+              <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-[#d9e1dd] px-1 pb-2">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <h3 className="text-lg font-semibold text-[#17201c]">{dayHeading.weekday}</h3>
+                  <p className="text-sm font-medium text-[#53635c]">{dayHeading.date}</p>
+                </div>
+                <p className="text-xs font-bold uppercase tracking-wide text-[#6f7f78]">
+                  {dayMeetings.length} {dayMeetings.length === 1 ? "meeting" : "meetings"}
+                </p>
+              </header>
+              <div className="grid gap-3">
+                {dayMeetings.map((meeting) => (
+                  <MeetingCard
+                    key={meeting.id}
+                    meeting={meeting}
+                    isExpanded={expandedNotes.has(meeting.id)}
+                    density={density}
+                    dayToneClass={MEETING_DAY_TONES[dayToneByDate.get(meeting.date) || 0]}
+                    showDate={false}
+                    onToggleNotes={onToggleNotes}
+                    onEditMeeting={onEditMeeting}
+                    onExtractMeeting={onExtractMeeting}
+                    onDeleteMeeting={onDeleteMeeting}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-3">
-      {meetings.map((meeting) => {
-        const isExpanded = expandedNotes.has(meeting.id);
-        const hasMoreNotes = meeting.notes && (meeting.notes.length > 420 || meeting.notes.split(/\r?\n/).length > 4);
-        const details = [meeting.project, meeting.location, meeting.attendees ? `With ${meeting.attendees}` : ""].filter(Boolean).join(" / ");
-        const time = meeting.start ? `${formatTime(meeting.start)}${meeting.end ? `-${formatTime(meeting.end)}` : ""}` : "Any time";
-        const dayToneClass = MEETING_DAY_TONES[dayToneByDate.get(meeting.date) || 0];
-        return (
-          <article
-            key={meeting.id}
-            className={[
-              "grid min-w-0 gap-3 rounded-lg border p-4",
-              density === "spacious" ? "md:grid-cols-[7.5rem_minmax(0,1fr)_auto]" : "",
-              dayToneClass,
-            ].join(" ")}
-          >
-            <div className={density === "compact" ? "flex flex-wrap gap-x-3 gap-y-1 text-sm font-bold text-[#235d91]" : "text-sm font-bold text-[#235d91]"}>
-              <span className="block">{time}</span>
-              <span className="block text-[#53635c]">{formatDate(meeting.date)}</span>
-            </div>
-            <div className="min-w-0 [overflow-wrap:anywhere]">
-              <h3 className="text-base font-semibold leading-snug">{meeting.title}</h3>
-              {details ? <p className="mt-1 text-sm text-[#53635c]">{details}</p> : null}
-              {meeting.notes ? (
-                <div className={isExpanded ? "note-preview mt-3" : "note-preview compact mt-3"}>
-                  <NotePreview text={meeting.notes} maxLines={isExpanded ? Infinity : 4} />
-                </div>
-              ) : null}
-              {hasMoreNotes ? (
-                <button className="mt-2 text-sm font-bold text-[#0b6b5c]" type="button" onClick={() => onToggleNotes(meeting.id)}>
-                  {isExpanded ? "Less notes" : "More notes"}
-                </button>
-              ) : null}
-            </div>
-            <div
-              className={
-                density === "compact"
-                  ? "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3"
-                  : "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 md:flex md:flex-wrap md:items-start md:justify-end"
-              }
-            >
-              <button className="secondary-button" type="button" onClick={() => onEditMeeting(meeting)}>
-                Edit
-              </button>
-              <button className="secondary-button" type="button" onClick={() => onExtractMeeting(meeting)}>
-                Extract
-              </button>
-              <button className="danger-button" type="button" onClick={() => onDeleteMeeting(meeting.id)}>
-                Delete
-              </button>
-            </div>
-          </article>
-        );
-      })}
+      {meetings.map((meeting) => (
+        <MeetingCard
+          key={meeting.id}
+          meeting={meeting}
+          isExpanded={expandedNotes.has(meeting.id)}
+          density={density}
+          dayToneClass={MEETING_DAY_TONES[dayToneByDate.get(meeting.date) || 0]}
+          onToggleNotes={onToggleNotes}
+          onEditMeeting={onEditMeeting}
+          onExtractMeeting={onExtractMeeting}
+          onDeleteMeeting={onDeleteMeeting}
+        />
+      ))}
     </div>
+  );
+}
+
+function MeetingCard({
+  meeting,
+  isExpanded,
+  density,
+  dayToneClass,
+  showDate = true,
+  onToggleNotes,
+  onEditMeeting,
+  onExtractMeeting,
+  onDeleteMeeting,
+}: {
+  meeting: Meeting;
+  isExpanded: boolean;
+  density: "compact" | "spacious";
+  dayToneClass: string;
+  showDate?: boolean;
+  onToggleNotes: (id: string) => void;
+  onEditMeeting: (meeting: Meeting) => void;
+  onExtractMeeting: (meeting: Meeting) => void;
+  onDeleteMeeting: (id: string) => void;
+}) {
+  const hasMoreNotes = meeting.notes && (meeting.notes.length > 420 || meeting.notes.split(/\r?\n/).length > 4);
+  const details = [meeting.project, meeting.location, meeting.attendees ? `With ${meeting.attendees}` : ""].filter(Boolean).join(" / ");
+  const time = meeting.start ? `${formatTime(meeting.start)}${meeting.end ? `-${formatTime(meeting.end)}` : ""}` : "Any time";
+
+  return (
+    <article
+      className={[
+        "grid min-w-0 gap-3 rounded-lg border p-4",
+        density === "spacious" ? "md:grid-cols-[7.5rem_minmax(0,1fr)_auto]" : "",
+        dayToneClass,
+      ].join(" ")}
+    >
+      <div className={density === "compact" ? "flex flex-wrap gap-x-3 gap-y-1 text-sm font-bold text-[#235d91]" : "text-sm font-bold text-[#235d91]"}>
+        <span className="block">{time}</span>
+        {showDate ? <span className="block text-[#53635c]">{formatDate(meeting.date)}</span> : null}
+      </div>
+      <div className="min-w-0 [overflow-wrap:anywhere]">
+        {showDate ? (
+          <h3 className="text-base font-semibold leading-snug">{meeting.title}</h3>
+        ) : (
+          <h4 className="text-base font-semibold leading-snug">{meeting.title}</h4>
+        )}
+        {details ? <p className="mt-1 text-sm text-[#53635c]">{details}</p> : null}
+        {meeting.notes ? (
+          <div className={isExpanded ? "note-preview mt-3" : "note-preview compact mt-3"}>
+            <NotePreview text={meeting.notes} maxLines={isExpanded ? Infinity : 4} />
+          </div>
+        ) : null}
+        {hasMoreNotes ? (
+          <button className="mt-2 text-sm font-bold text-[#0b6b5c]" type="button" onClick={() => onToggleNotes(meeting.id)}>
+            {isExpanded ? "Less notes" : "More notes"}
+          </button>
+        ) : null}
+      </div>
+      <div
+        className={
+          density === "compact"
+            ? "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3"
+            : "grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 md:flex md:flex-wrap md:items-start md:justify-end"
+        }
+      >
+        <button className="secondary-button" type="button" onClick={() => onEditMeeting(meeting)}>
+          Edit
+        </button>
+        <button className="secondary-button" type="button" onClick={() => onExtractMeeting(meeting)}>
+          Pull tasks
+        </button>
+        <button className="danger-button" type="button" onClick={() => onDeleteMeeting(meeting.id)}>
+          Delete
+        </button>
+      </div>
+    </article>
   );
 }
 
 function TaskList({
   tasks,
-  meetingsById,
   emptyText,
   onToggleTaskDone,
   onEditTask,
@@ -1451,7 +1547,6 @@ function TaskList({
   onMoveTaskWaiting,
 }: {
   tasks: Task[];
-  meetingsById: Map<string, Meeting>;
   emptyText: string;
   onToggleTaskDone: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -1461,9 +1556,7 @@ function TaskList({
   if (!tasks.length) return <EmptyState text={emptyText} />;
   return (
     <div className="grid gap-3">
-      {tasks.map((task) => {
-        const meeting = task.meetingId ? meetingsById.get(task.meetingId) : null;
-        return (
+      {tasks.map((task) => (
           <article
             key={task.id}
             className={[
@@ -1508,17 +1601,12 @@ function TaskList({
                 <Tag>{task.project || "Inbox"}</Tag>
                 <Tag tone={task.priority === "P1" ? "red" : task.priority === "P2" ? "blue" : "gray"}>{task.priority}</Tag>
                 <Tag>{task.effort}</Tag>
-                <Tag>{task.energy}</Tag>
-                <Tag>{task.context}</Tag>
-                {task.owner ? <Tag>{task.owner}</Tag> : null}
                 {task.due ? <Tag>Due {formatDate(task.due)}</Tag> : null}
                 {task.status === "Waiting" ? <Tag tone="amber">Waiting</Tag> : null}
-                {meeting ? <Tag>{meeting.title}</Tag> : null}
               </div>
             </div>
           </article>
-        );
-      })}
+      ))}
     </div>
   );
 }
@@ -1590,29 +1678,19 @@ function TopicList({
 function MeetingEditor({
   draft,
   projects,
-  suggestions,
-  suggestionMessage,
-  isExtracting,
   onChange,
   onSave,
   onDelete,
-  onExtract,
+  onPullTasks,
   onMakeTopic,
-  onSuggestionChange,
-  onAddSuggestions,
 }: {
   draft: Meeting;
   projects: string[];
-  suggestions: TaskSuggestion[];
-  suggestionMessage: string;
-  isExtracting: boolean;
   onChange: (patch: Partial<Meeting>) => void;
   onSave: () => void;
   onDelete: () => void;
-  onExtract: () => void;
+  onPullTasks: () => void;
   onMakeTopic: () => void;
-  onSuggestionChange: (index: number, patch: Partial<TaskSuggestion>) => void;
-  onAddSuggestions: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(!draft.notes.trim());
   const detailsSummary = [
@@ -1659,17 +1737,6 @@ function MeetingEditor({
           <option key={project} value={project} />
         ))}
       </datalist>
-      {suggestionMessage ? (
-        <SuggestionPanel
-          meeting={draft}
-          suggestions={suggestions}
-          message={suggestionMessage}
-          projects={projects}
-          isExtracting={isExtracting}
-          onChange={onSuggestionChange}
-          onAdd={onAddSuggestions}
-        />
-      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button className="danger-button w-full sm:w-auto" type="button" onClick={onDelete}>
           Delete
@@ -1678,8 +1745,8 @@ function MeetingEditor({
           <button className="secondary-button" type="button" onClick={onMakeTopic} disabled={!draft.notes.trim()}>
             Copy to topic
           </button>
-          <button className="secondary-button" type="button" onClick={onExtract}>
-            Extract tasks
+          <button className="secondary-button" type="button" onClick={onPullTasks}>
+            Save and pull tasks
           </button>
           <button className="primary-button" type="submit">
             Save meeting
@@ -1693,14 +1760,12 @@ function MeetingEditor({
 function TaskEditor({
   draft,
   projects,
-  meetings,
   onChange,
   onSave,
   onDelete,
 }: {
   draft: Task;
   projects: string[];
-  meetings: Meeting[];
   onChange: (patch: Partial<Task>) => void;
   onSave: () => void;
   onDelete: () => void;
@@ -1719,21 +1784,7 @@ function TaskEditor({
         <SelectField label="Status" value={draft.status} values={TASK_STATUSES} onChange={(value) => onChange({ status: value as TaskStatus })} />
         <SelectField label="Priority" value={draft.priority} values={TASK_PRIORITIES} onChange={(value) => onChange({ priority: value as TaskPriority })} />
         <SelectField label="Effort" value={draft.effort} values={TASK_EFFORTS} onChange={(value) => onChange({ effort: value as TaskEffort })} />
-        <SelectField label="Energy" value={draft.energy} values={TASK_ENERGIES} onChange={(value) => onChange({ energy: value as TaskEnergy })} />
-        <SelectField label="Context" value={draft.context} values={TASK_CONTEXTS} onChange={(value) => onChange({ context: value as TaskContext })} />
-        <LabeledInput label="Owner" value={draft.owner} onChange={(value) => onChange({ owner: value })} />
         <LabeledInput label="Due" type="date" value={draft.due} onChange={(value) => onChange({ due: value })} />
-        <label className="grid gap-2 text-sm font-semibold text-[#53635c]">
-          Meeting
-          <select className="field" value={draft.meetingId} onChange={(event) => onChange({ meetingId: event.target.value })}>
-            <option value="">No linked meeting</option>
-            {meetings.map((meeting) => (
-              <option key={meeting.id} value={meeting.id}>
-                {formatDate(meeting.date)} - {meeting.title}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
       <datalist id="task-project-options">
         {projects.map((project) => (
@@ -1878,69 +1929,79 @@ function TopicEditor({
   );
 }
 
-function SuggestionPanel({
-  meeting,
+function BulkTaskEditor({
   suggestions,
   message,
   projects,
-  isExtracting,
   onChange,
-  onAdd,
+  onRemove,
+  onSave,
 }: {
-  meeting: Meeting;
   suggestions: TaskSuggestion[];
   message: string;
   projects: string[];
-  isExtracting: boolean;
   onChange: (index: number, patch: Partial<TaskSuggestion>) => void;
-  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onSave: () => void;
 }) {
+  const hasBlankTitle = suggestions.some((suggestion) => !suggestion.title.trim());
+
   return (
-    <section className="rounded-lg border border-[#bfd5cf] bg-[#f2faf7] p-3 sm:p-4">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <h3 className="font-semibold">Task suggestions</h3>
-          <p className="text-sm text-[#53635c]">From {meeting.title}</p>
-        </div>
-        <button className="primary-button w-full sm:w-auto" type="button" onClick={onAdd} disabled={!suggestions.some((suggestion) => suggestion.selected)}>
-          Add selected
-        </button>
-      </div>
+    <form
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+    >
+      <p className="text-sm text-[#53635c]">{message}</p>
       {suggestions.length ? (
-        <div className="mt-3 grid gap-2">
+        <div className="grid gap-3">
           {suggestions.map((suggestion, index) => (
-            <div key={`suggestion-${index}`} className="grid gap-2 rounded-md border border-[#d9e1dd] bg-white p-3 sm:grid-cols-[auto_minmax(180px,1fr)_minmax(150px,220px)_5.5rem]">
-              <input
-                className="mt-2 h-5 w-5 accent-[#0b6b5c]"
-                type="checkbox"
-                checked={suggestion.selected}
-                onChange={(event) => onChange(index, { selected: event.target.checked })}
-                aria-label="Select task suggestion"
+            <div
+              key={`pulled-task-${index}`}
+              className="grid gap-3 rounded-lg border border-[#d9e1dd] bg-[#fbfcfc] p-3 lg:grid-cols-[minmax(240px,1fr)_minmax(180px,0.65fr)_minmax(130px,0.35fr)_auto] lg:items-end"
+            >
+              <LabeledInput
+                label={`Title ${index + 1}`}
+                value={suggestion.title}
+                autoFocus={index === 0}
+                onChange={(title) => onChange(index, { title })}
               />
-              <input className="field" value={suggestion.title} onChange={(event) => onChange(index, { title: event.target.value })} />
-              <select className="field" value={suggestion.project} onChange={(event) => onChange(index, { project: event.target.value })}>
-                {[...new Set([...projects, suggestion.project, "Inbox"].filter(Boolean))].sort().map((project) => (
-                  <option key={project} value={project}>
-                    {project}
-                  </option>
-                ))}
-              </select>
-              <select className="field" value={suggestion.priority} onChange={(event) => onChange(index, { priority: event.target.value as TaskPriority })}>
-                {TASK_PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>
-                    {priority}
-                  </option>
-                ))}
-              </select>
+              <LabeledInput
+                label="Project"
+                value={suggestion.project}
+                list="bulk-task-project-options"
+                onChange={(project) => onChange(index, { project })}
+              />
+              <SelectField
+                label="Status"
+                value={suggestion.status}
+                values={TASK_STATUSES}
+                onChange={(status) => onChange(index, { status: status as TaskStatus })}
+              />
+              <button className="danger-button" type="button" onClick={() => onRemove(index)}>
+                Remove
+              </button>
             </div>
           ))}
         </div>
       ) : (
-        <p className="mt-3 rounded-md border border-[#d9e1dd] bg-white p-3 text-sm font-semibold text-[#53635c]">
-          {isExtracting ? "Extracting tasks..." : message}
-        </p>
+        <div className="rounded-md border border-dashed border-[#cfd9d4] bg-[#fbfcfc] p-4 text-sm font-semibold text-[#53635c]">
+          Nothing to create yet.
+        </div>
       )}
-    </section>
+      <datalist id="bulk-task-project-options">
+        {[...new Set([...projects, ...suggestions.map((suggestion) => suggestion.project), "Inbox"].filter(Boolean))].sort().map((project) => (
+          <option key={project} value={project} />
+        ))}
+      </datalist>
+      <div className="flex justify-end">
+        <button className="primary-button w-full sm:w-auto" type="submit" disabled={!suggestions.length || hasBlankTitle}>
+          Create {suggestions.length || "all"} task{suggestions.length === 1 ? "" : "s"}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -2027,15 +2088,35 @@ function Panel({
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Modal({
+  title,
+  children,
+  headerActions,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  headerActions?: React.ReactNode;
+  onClose: () => void;
+}) {
+  const titleId = useId();
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/35 px-2 py-3 sm:px-4 sm:py-6">
-      <section className="mx-auto flex max-h-[calc(100dvh-1.5rem)] max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d9e1dd] bg-white shadow-xl sm:max-h-[calc(100dvh-3rem)]">
+      <section
+        className="mx-auto flex max-h-[calc(100dvh-1.5rem)] max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d9e1dd] bg-white shadow-xl sm:max-h-[calc(100dvh-3rem)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[#d9e1dd] p-4 sm:p-5">
-          <h2 className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
-          <button className="ghost-button" type="button" onClick={onClose} aria-label="Close">
-            Close
-          </button>
+          <h2 id={titleId} className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            {headerActions}
+            <button className="ghost-button" type="button" onClick={onClose} aria-label="Close">
+              Close
+            </button>
+          </div>
         </div>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-5">{children}</div>
       </section>
@@ -2434,7 +2515,7 @@ function buildNoteNodes(text: string, maxLines: number): NoteNode[] {
 
       const heading = line.match(/^(#{1,3})\s+(.+)$/);
       const bullet = line.match(/^[-*]\s+(.+)$/);
-      const task = line.match(taskLinePrefix());
+      const taskTitle = markedTaskTitle(line);
 
       if (heading) {
         flushList();
@@ -2442,9 +2523,9 @@ function buildNoteNodes(text: string, maxLines: number): NoteNode[] {
         return;
       }
 
-      if (bullet || task) {
+      if (bullet || taskTitle !== null) {
         if (!currentList) currentList = [];
-        currentList.push({ text: (bullet ? bullet[1] : task?.[1]) || "", task: Boolean(task) });
+        currentList.push({ text: (bullet ? bullet[1] : taskTitle) || "", task: taskTitle !== null });
         return;
       }
 
@@ -2634,54 +2715,6 @@ function confirmDiscardChanges(draft: Meeting | Task | Topic, baseline: string) 
   return draftSnapshot(draft) === baseline || confirm("You have unsaved changes. Close without saving?");
 }
 
-function normalizeSuggestion(suggestion: Partial<TaskSuggestion>, meeting: Meeting): TaskSuggestion {
-  const status = pickValue(suggestion.status, TASK_STATUSES, "Next");
-  return {
-    selected: suggestion.selected !== false,
-    title: cleanText(suggestion.title),
-    project: cleanText(suggestion.project) || meeting.project || "Inbox",
-    status,
-    priority: pickValue(suggestion.priority, TASK_PRIORITIES, "P2"),
-    effort: pickValue(suggestion.effort, TASK_EFFORTS, "Quick"),
-    energy: pickValue(suggestion.energy, TASK_ENERGIES, "Normal"),
-    context: pickValue(suggestion.context, TASK_CONTEXTS, "Follow-up"),
-    owner: cleanText(suggestion.owner) || (status === "Waiting" ? "" : "Jon"),
-    due: cleanText(suggestion.due),
-    meetingId: meeting.id,
-    notes: cleanText(suggestion.notes) || `Source: ${formatDate(meeting.date)} ${meeting.title}`,
-  };
-}
-
-function extractSuggestionsLocally(meeting: Meeting): TaskSuggestion[] {
-  const actionWords =
-    /\b(add|alert|ask|build|buy|call|check|clarify|confirm|create|decide|diagnose|discuss|get|give|go|investigate|make|order|pay|pick up|prepare|refresh|revise|schedule|send|submit|test|update|verify|write|waiting|risk|question|owe)\b/i;
-
-  return meeting.notes
-    .split(/\n+/)
-    .map((line) => normalizeText(line.replace(/^[-*\u2022\u2610\t ]+/, "")))
-    .filter(Boolean)
-    .filter((line) => taskLinePrefix().test(line) || actionWords.test(line))
-    .map((line) => {
-      const title = normalizeText(line.replace(taskLinePrefix(), ""));
-      const status = inferStatus(title);
-      const effort = inferEffort(title);
-      return {
-        selected: true,
-        title,
-        project: inferProject(title, meeting.project),
-        status,
-        priority: inferPriority(title, status),
-        effort,
-        energy: effort === "Quick" ? "Low-focus" : "Normal",
-        context: inferContext(title),
-        owner: status === "Waiting" ? "" : "Jon",
-        due: "",
-        meetingId: meeting.id,
-        notes: `Source: ${formatDate(meeting.date)} ${meeting.title}`,
-      };
-    });
-}
-
 function parseIcsMeetings(text: string): Meeting[] {
   return unfoldIcs(text)
     .split(/\r?\nBEGIN:VEVENT\r?\n|\r?\nBEGIN:VEVENT\r?\n/)
@@ -2803,16 +2836,22 @@ function groupTasksByProject(tasks: Task[]) {
   return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
 }
 
-function meetingMap(meetings: Meeting[]) {
-  return new Map(meetings.map((meeting) => [meeting.id, meeting]));
-}
-
 function meetingDayToneMap(meetings: Meeting[]) {
   const dates = new Map<string, number>();
   meetings.forEach((meeting) => {
     if (!dates.has(meeting.date)) dates.set(meeting.date, dates.size % MEETING_DAY_TONES.length);
   });
   return dates;
+}
+
+function groupMeetingsByDate(meetings: Meeting[]) {
+  const groups = new Map<string, Meeting[]>();
+  meetings.forEach((meeting) => {
+    const group = groups.get(meeting.date);
+    if (group) group.push(meeting);
+    else groups.set(meeting.date, [meeting]);
+  });
+  return [...groups.entries()];
 }
 
 function sortTasksForDisplay(left: Task, right: Task) {
@@ -2846,65 +2885,6 @@ function priorityBorder(priority: TaskPriority) {
   return "border-[#d9e1dd]";
 }
 
-function inferProject(line: string, fallback: string) {
-  const lower = line.toLowerCase();
-  const matches = [
-    ["govdelivery", "Media / GovDelivery"],
-    ["press release", "Media / GovDelivery"],
-    ["tugboat", "Media / GovDelivery"],
-    ["action agenda", "Action Agenda rollout"],
-    ["fact sheet", "Action Agenda rollout"],
-    ["caravan", "Caravan Lab - Salmon in Schools"],
-    ["salmon", "Caravan Lab - Salmon in Schools"],
-    ["riparian", "Riparian Roundtable products"],
-    ["human wellbeing", "Human Wellbeing"],
-    ["making waves", "Making Waves / website"],
-    ["homepage", "Making Waves / website"],
-    ["commitment", "Commitments Dashboard"],
-    ["state of the sound", "State of the Sound"],
-    ["position description", "HR"],
-    ["katie", "HR"],
-  ];
-  const match = matches.find(([needle]) => lower.includes(needle));
-  return match ? match[1] : fallback || "Inbox";
-}
-
-function inferStatus(line: string): TaskStatus {
-  const lower = line.toLowerCase();
-  if (lower.includes("waiting") || lower.includes("will come back") || lower.includes("will generate")) return "Waiting";
-  if (lower.includes("today") || lower.includes("asap") || lower.includes("owe")) return "Today";
-  return "Next";
-}
-
-function inferPriority(line: string, status: TaskStatus): TaskPriority {
-  const lower = line.toLowerCase();
-  if (status === "Today") return "P1";
-  if (lower.includes("deadline") || lower.includes("risk") || lower.includes("broken") || lower.includes("approve")) return "P1";
-  if (lower.includes("schedule") || lower.includes("clarify") || lower.includes("confirm")) return "P2";
-  return "P3";
-}
-
-function inferEffort(line: string): TaskEffort {
-  const lower = line.toLowerCase();
-  if (lower.includes("write") || lower.includes("build") || lower.includes("design") || lower.includes("schedule detailing")) return "Medium";
-  if (lower.includes("investigate") || lower.includes("refresh") || lower.includes("finish")) return "Medium";
-  return "Quick";
-}
-
-function inferContext(line: string): TaskContext {
-  const lower = line.toLowerCase();
-  if (lower.includes("website") || lower.includes("web") || lower.includes("homepage") || lower.includes("elementor")) return "Website";
-  if (lower.includes("design") || lower.includes("fact sheet") || lower.includes("video")) return "Design";
-  if (lower.includes("send") || lower.includes("email") || lower.includes("govdelivery")) return "Email";
-  if (lower.includes("schedule") || lower.includes("meeting")) return "Meeting";
-  if (lower.includes("draft") || lower.includes("write") || lower.includes("press release")) return "Writing";
-  return "Follow-up";
-}
-
-function taskLinePrefix() {
-  return /^(?:task|todo|to do|action item|action|next step)\s*[:\-]\s*(.+)$/i;
-}
-
 function meetingDateTime(meeting: Meeting) {
   return `${meeting.date || "9999-12-31"}T${meeting.start || "23:59"}`;
 }
@@ -2918,6 +2898,21 @@ function formatDate(dateString: string) {
     return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
   } catch {
     return normalizedDate;
+  }
+}
+
+function formatMeetingDayHeading(dateString: string) {
+  const normalizedDate = dateOnly(dateString);
+  if (!normalizedDate) return { weekday: "Date unavailable", date: "No date" };
+  const date = safeDate(`${normalizedDate}T12:00:00`);
+  if (!date) return { weekday: "Date unavailable", date: normalizedDate };
+  try {
+    return {
+      weekday: new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date),
+      date: new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(date),
+    };
+  } catch {
+    return { weekday: "Meeting day", date: normalizedDate };
   }
 }
 
@@ -2938,6 +2933,12 @@ function todayIso() {
   return localDateIso(new Date());
 }
 
+function recentMeetingCutoff() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  return localDateIso(cutoff);
+}
+
 function localDateIso(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -2947,10 +2948,6 @@ function localDateIso(date: Date) {
 
 function slugify(value: string) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || createId();
-}
-
-function normalizeText(text: string) {
-  return text.replace(/\s+/g, " ").trim();
 }
 
 function cleanText(value: unknown) {

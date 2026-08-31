@@ -29,6 +29,8 @@ Open:
 http://localhost:3000
 ```
 
+Work remains at `/`. The Personal space is available at `/personal`; both routes use the same signed-in session and store space-scoped records in the same Neon database.
+
 ## Checks
 
 ```sh
@@ -46,5 +48,6 @@ npm run build
 - ICS import that strips calendar descriptions and preserves manual notes on re-import
 - JSON import/export for migration and backups
 - Task views for Today, Next, Waiting, Projects, and Done
+- Separate Work and Personal spaces, with an item-level move action and a bookmarkable `/personal` view
 - Completed tasks stay visible on the dashboard for the day they were checked off
 - Verbatim task pulling from meeting-note lines marked with the Task formatting control

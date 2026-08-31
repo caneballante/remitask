@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   ChangeEvent,
   ClipboardEvent,
@@ -18,6 +19,9 @@ import {
 import type {
   AppState,
   Meeting,
+  MovableEntityKind,
+  Space,
+  StateChanges,
   Task,
   TaskContext,
   TaskEffort,
@@ -35,6 +39,7 @@ const TASK_PRIORITIES: TaskPriority[] = ["P1", "P2", "P3"];
 const TASK_EFFORTS: TaskEffort[] = ["Quick", "Medium", "Deep"];
 const TASK_ENERGIES: TaskEnergy[] = ["Low-focus", "Normal", "High-focus"];
 const TASK_CONTEXTS: TaskContext[] = ["Email", "Meeting", "Writing", "Website", "Design", "Follow-up", "Admin"];
+const SPACES: Space[] = ["work", "personal"];
 const MEETING_DAY_TONES = [
   "border-[#d7e4de] bg-[#fbfcfc]",
   "border-[#d7ddeb] bg-[#f7f9fd]",
@@ -95,7 +100,7 @@ export class RemiTaskErrorBoundary extends Component<{ children: ReactNode }, Er
   }
 }
 
-export function RemiTaskApp() {
+export function RemiTaskApp({ space = "work" }: { space?: Space }) {
   const [session, setSession] = useState<SessionState>({
     checked: false,
     authenticated: false,
@@ -163,13 +168,13 @@ export function RemiTaskApp() {
       setIsLoadingState(true);
       setLoadError("");
       try {
-        const response = await fetch("/api/state", { cache: "no-store" });
+        const response = await fetch(`/api/state?space=${space}`, { cache: "no-store" });
         if (response.status === 401) {
           setSession((current) => ({ ...current, authenticated: false, authRequired: true }));
           return;
         }
         if (!response.ok) throw new Error("Unable to load RemiTask data.");
-        const loaded = normalizeLoadedState(await response.json());
+        const loaded = normalizeLoadedState(await response.json(), space);
         appStateRef.current = loaded;
         setAppState(loaded);
       } catch (error) {
@@ -180,19 +185,20 @@ export function RemiTaskApp() {
     }
 
     void loadState();
-  }, [session.checked, session.authenticated]);
+  }, [session.checked, session.authenticated, space]);
 
-  const persistState = useCallback((nextState: AppState) => {
+  const persistState = useCallback((previousState: AppState, nextState: AppState) => {
     const generation = ++saveGenerationRef.current;
     setSaveStatus("Saving...");
+    const changes = buildStateChanges(previousState, nextState);
 
     saveQueueRef.current = saveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const response = await fetch("/api/state", {
+        const response = await fetch(`/api/state?space=${space}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(nextState),
+          body: JSON.stringify({ changes }),
         });
 
         if (response.status === 401) {
@@ -213,17 +219,72 @@ export function RemiTaskApp() {
       .catch(() => setSaveStatus("Save failed"));
 
     return saveQueueRef.current;
-  }, []);
+  }, [space]);
 
   const commitState = useCallback(
     (updater: (current: AppState) => AppState) => {
-      const next = normalizeLoadedState(updater(appStateRef.current));
+      const previous = appStateRef.current;
+      const next = normalizeLoadedState(updater(previous), space);
       appStateRef.current = next;
       setAppState(next);
-      return persistState(next);
+      return persistState(previous, next);
     },
-    [persistState],
+    [persistState, space],
   );
+
+  function removeEntityLocally(kind: MovableEntityKind, id: string, includeLinkedTasks = false) {
+    const current = appStateRef.current;
+    const next: AppState = {
+      ...current,
+      meetings: kind === "meeting" ? current.meetings.filter((meeting) => meeting.id !== id) : current.meetings,
+      tasks:
+        kind === "task"
+          ? current.tasks.filter((task) => task.id !== id)
+          : kind === "meeting"
+            ? includeLinkedTasks
+              ? current.tasks.filter((task) => task.meetingId !== id)
+              : current.tasks.map((task) => (task.meetingId === id ? { ...task, meetingId: "" } : task))
+            : current.tasks,
+      topics: kind === "topic" ? current.topics.filter((topic) => topic.id !== id) : current.topics,
+    };
+    appStateRef.current = next;
+    setAppState(next);
+  }
+
+  function moveEntityToOtherSpace(kind: MovableEntityKind, id: string, includeLinkedTasks = false) {
+    const targetSpace = otherSpace(space);
+    const generation = ++saveGenerationRef.current;
+    setSaveStatus("Saving...");
+    saveQueueRef.current = saveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await fetch(`/api/state?space=${space}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, id, targetSpace, includeLinkedTasks }),
+        });
+        if (response.status === 401) {
+          setSession((current) => ({ ...current, authenticated: false, authRequired: true }));
+          throw new Error("Session expired.");
+        }
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error || `Unable to move item to ${spaceLabel(targetSpace)}.`);
+        }
+        removeEntityLocally(kind, id, includeLinkedTasks);
+      });
+    saveQueueRef.current
+      .then(() => {
+        if (saveGenerationRef.current === generation) setSaveStatus("Saved");
+      })
+      .catch(() => setSaveStatus("Save failed"));
+  }
+
+  function moveTaskToOtherSpace(task: Task) {
+    const targetSpace = otherSpace(space);
+    if (!confirm(`Move "${task.title}" to ${spaceLabel(targetSpace)}?`)) return;
+    moveEntityToOtherSpace("task", task.id);
+  }
 
   const projects = useMemo(() => {
     return [
@@ -345,7 +406,7 @@ export function RemiTaskApp() {
   }
 
   function openMeetingEditor(meeting?: Meeting) {
-    const draft = meeting ? { ...meeting } : blankMeeting(selectedDate);
+    const draft = meeting ? { ...meeting } : blankMeeting(selectedDate, space);
     meetingDraftBaselineRef.current = draftSnapshot(draft);
     setMeetingDraft(draft);
   }
@@ -371,12 +432,15 @@ export function RemiTaskApp() {
       updatedAt: now,
     };
 
-    commitState((current) => ({
+    const persistence = commitState((current) => ({
       ...current,
       meetings: current.meetings.some((meeting) => meeting.id === savedMeeting.id)
         ? current.meetings.map((meeting) => (meeting.id === savedMeeting.id ? savedMeeting : meeting))
         : [savedMeeting, ...current.meetings],
     }));
+    if (savedMeeting.space !== space) {
+      void persistence.then(() => removeEntityLocally("meeting", savedMeeting.id), () => undefined);
+    }
     if (options.close === false) {
       meetingDraftBaselineRef.current = draftSnapshot(savedMeeting);
       setMeetingDraft(savedMeeting);
@@ -426,6 +490,7 @@ export function RemiTaskApp() {
       .filter((title) => !existingTitles.has(title.trim()))
       .map((title): TaskSuggestion => ({
         selected: true,
+        space: savedMeeting.space,
         title,
         project: savedMeeting.project || "Inbox",
         status: "Next",
@@ -474,6 +539,7 @@ export function RemiTaskApp() {
       .filter((suggestion) => suggestion.title.trim())
       .map((suggestion) => ({
         id: createId(),
+        space: suggestion.space,
         title: suggestion.title.trim(),
         project: suggestion.project.trim() || "Inbox",
         status: suggestion.status,
@@ -486,6 +552,7 @@ export function RemiTaskApp() {
         notes: suggestion.notes,
         meetingId: suggestion.meetingId,
         createdAt: now,
+        updatedAt: now,
         completedAt: "",
       }));
 
@@ -501,13 +568,13 @@ export function RemiTaskApp() {
   }
 
   function openTaskEditor(task?: Task, project?: string) {
-    const draft = task ? { ...task } : blankTask(project || projects[0] || "Inbox");
+    const draft = task ? { ...task } : blankTask(project || projects[0] || "Inbox", space);
     taskDraftBaselineRef.current = draftSnapshot(draft);
     setTaskDraft(draft);
   }
 
   function openTopicEditor(topic?: Topic) {
-    const draft = topic ? { ...topic, pages: topic.pages.map((page) => ({ ...page })) } : blankTopic(projects[0] || "Inbox");
+    const draft = topic ? { ...topic, pages: topic.pages.map((page) => ({ ...page })) } : blankTopic(projects[0] || "Inbox", space);
     topicDraftBaselineRef.current = draftSnapshot(draft);
     setTopicDraft(draft);
   }
@@ -535,16 +602,20 @@ export function RemiTaskApp() {
       owner: taskDraft.owner.trim(),
       notes: taskDraft.notes.trim(),
       createdAt: existing?.createdAt || taskDraft.createdAt || now,
+      updatedAt: now,
       completedAt: taskDraft.status === "Done" ? taskDraft.completedAt || now : "",
     };
     if (!nextTask.title) return;
 
-    commitState((current) => ({
+    const persistence = commitState((current) => ({
       ...current,
       tasks: current.tasks.some((task) => task.id === nextTask.id)
         ? current.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
         : [nextTask, ...current.tasks],
     }));
+    if (nextTask.space !== space) {
+      void persistence.then(() => removeEntityLocally("task", nextTask.id), () => undefined);
+    }
     taskDraftBaselineRef.current = "";
     setTaskDraft(null);
   }
@@ -564,7 +635,7 @@ export function RemiTaskApp() {
   function updateTask(id: string, patch: Partial<Task>) {
     commitState((current) => ({
       ...current,
-      tasks: current.tasks.map((task) => (task.id === id ? { ...task, ...patch } : task)),
+      tasks: current.tasks.map((task) => (task.id === id ? { ...task, ...patch, updatedAt: new Date().toISOString() } : task)),
     }));
   }
 
@@ -600,12 +671,15 @@ export function RemiTaskApp() {
     };
     if (!nextTopic.title) return;
 
-    commitState((current) => ({
+    const persistence = commitState((current) => ({
       ...current,
       topics: current.topics.some((topic) => topic.id === nextTopic.id)
         ? current.topics.map((topic) => (topic.id === nextTopic.id ? nextTopic : topic))
         : [nextTopic, ...current.topics],
     }));
+    if (nextTopic.space !== space) {
+      void persistence.then(() => removeEntityLocally("topic", nextTopic.id), () => undefined);
+    }
     topicDraftBaselineRef.current = "";
     setTopicDraft(null);
   }
@@ -633,7 +707,7 @@ export function RemiTaskApp() {
 
   function makeTaskFromTopic(topic: Topic) {
     const page = topicPreviewPage(topic);
-    const blankDraft = blankTask(topic.project || "Inbox");
+    const blankDraft = blankTask(topic.project || "Inbox", topic.space);
     taskDraftBaselineRef.current = draftSnapshot(blankDraft);
     setTaskDraft({
       ...blankDraft,
@@ -646,7 +720,7 @@ export function RemiTaskApp() {
     const source = `${formatDate(meeting.date)}${meeting.start ? ` ${formatTime(meeting.start)}` : ""}`;
     const title = meeting.title || "Meeting notes";
     const notes = [`Source: ${source} - ${title}`, meeting.notes.trim()].filter(Boolean).join("\n\n");
-    const topic = blankTopic(meeting.project || projects[0] || "Inbox");
+    const topic = blankTopic(meeting.project || projects[0] || "Inbox", meeting.space);
     meetingDraftBaselineRef.current = "";
     setMeetingDraft(null);
     topicDraftBaselineRef.current = draftSnapshot(topic);
@@ -674,12 +748,12 @@ export function RemiTaskApp() {
     if (!file) return;
     try {
       const text = await readFileText(file);
-      const importedState = normalizeLoadedState(JSON.parse(text));
+      const importedState = stateInSpace(normalizeLoadedState(JSON.parse(text), space), space);
       const previousState = appStateRef.current;
       appStateRef.current = importedState;
       setAppState(importedState);
       try {
-        await persistState(importedState);
+        await persistState(previousState, importedState);
         setImportStatus(`Imported ${importedState.meetings.length} meetings, ${importedState.tasks.length} tasks, and ${importedState.topics.length} topics.`);
       } catch (error) {
         appStateRef.current = previousState;
@@ -699,7 +773,7 @@ export function RemiTaskApp() {
     if (!file) return;
     try {
       const text = await readFileText(file);
-      const imported = parseIcsMeetings(text);
+      const imported = parseIcsMeetings(text).map((meeting) => ({ ...meeting, space }));
       if (!imported.length) {
         setIcsStatus("No calendar events found in that .ics file.");
         return;
@@ -800,8 +874,18 @@ export function RemiTaskApp() {
       <header className="border-b border-[#d9e1dd] bg-white px-3 py-5 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-[#235d91]">Meeting notes / task tracking</p>
+            <p className="text-xs font-bold uppercase text-[#235d91]">
+              {space === "personal" ? "Personal planning" : "Meeting notes / task tracking"}
+            </p>
             <h1 className="mt-1 text-3xl font-semibold leading-tight sm:text-4xl">RemiTask</h1>
+            <div className="mt-3 inline-flex rounded-md border border-[#cfd9d4] bg-[#f7f9f8] p-1 text-sm font-semibold">
+              <Link className={space === "work" ? "rounded px-3 py-1.5 bg-white text-[#17201c] shadow-sm" : "rounded px-3 py-1.5 text-[#53635c]"} href="/">
+                Work
+              </Link>
+              <Link className={space === "personal" ? "rounded px-3 py-1.5 bg-white text-[#17201c] shadow-sm" : "rounded px-3 py-1.5 text-[#53635c]"} href="/personal">
+                Personal
+              </Link>
+            </div>
           </div>
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
             <label className="col-span-2 flex min-w-0 items-center gap-2 rounded-md border border-[#cfd9d4] bg-[#f7f9f8] px-3 py-2 text-sm font-semibold text-[#53635c] sm:col-span-1 sm:w-auto">
@@ -888,6 +972,8 @@ export function RemiTaskApp() {
             onViewAllTopics={() => setActiveTab("topics")}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
+            onMoveTaskSpace={moveTaskToOtherSpace}
+            moveTaskSpaceLabel={`Move to ${spaceLabel(otherSpace(space))}`}
           />
         ) : null}
 
@@ -925,6 +1011,8 @@ export function RemiTaskApp() {
             onAddTask={(project) => openTaskEditor(undefined, project)}
             onMoveTaskToday={(id) => updateTask(id, { status: "Today" })}
             onMoveTaskWaiting={(id) => updateTask(id, { status: "Waiting" })}
+            onMoveTaskSpace={moveTaskToOtherSpace}
+            moveTaskSpaceLabel={`Move to ${spaceLabel(otherSpace(space))}`}
           />
         ) : null}
 
@@ -1032,6 +1120,8 @@ function DashboardView({
   onViewAllTopics,
   onMoveTaskToday,
   onMoveTaskWaiting,
+  onMoveTaskSpace,
+  moveTaskSpaceLabel,
 }: {
   summaryItems: (string | number)[][];
   meetings: Meeting[];
@@ -1053,6 +1143,8 @@ function DashboardView({
   onViewAllTopics: () => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
+  onMoveTaskSpace: (task: Task) => void;
+  moveTaskSpaceLabel: string;
 }) {
   return (
     <div className="grid gap-4">
@@ -1085,6 +1177,8 @@ function DashboardView({
             onEditTask={onEditTask}
             onMoveTaskToday={onMoveTaskToday}
             onMoveTaskWaiting={onMoveTaskWaiting}
+            onMoveTaskSpace={onMoveTaskSpace}
+            moveTaskSpaceLabel={moveTaskSpaceLabel}
           />
         </Panel>
         <Panel title="Topics">
@@ -1279,6 +1373,8 @@ function TasksView({
   onAddTask,
   onMoveTaskToday,
   onMoveTaskWaiting,
+  onMoveTaskSpace,
+  moveTaskSpaceLabel,
 }: {
   tasks: Task[];
   projects: string[];
@@ -1293,6 +1389,8 @@ function TasksView({
   onAddTask: (project: string) => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
+  onMoveTaskSpace: (task: Task) => void;
+  moveTaskSpaceLabel: string;
 }) {
   const groupedTasks = groupTasksByProject(tasks);
 
@@ -1356,6 +1454,8 @@ function TasksView({
                   onEditTask={onEditTask}
                   onMoveTaskToday={onMoveTaskToday}
                   onMoveTaskWaiting={onMoveTaskWaiting}
+                  onMoveTaskSpace={onMoveTaskSpace}
+                  moveTaskSpaceLabel={moveTaskSpaceLabel}
                 />
               </Panel>
             ))
@@ -1372,6 +1472,8 @@ function TasksView({
             onEditTask={onEditTask}
             onMoveTaskToday={onMoveTaskToday}
             onMoveTaskWaiting={onMoveTaskWaiting}
+            onMoveTaskSpace={onMoveTaskSpace}
+            moveTaskSpaceLabel={moveTaskSpaceLabel}
           />
         </Panel>
       )}
@@ -1545,6 +1647,8 @@ function TaskList({
   onEditTask,
   onMoveTaskToday,
   onMoveTaskWaiting,
+  onMoveTaskSpace,
+  moveTaskSpaceLabel,
 }: {
   tasks: Task[];
   emptyText: string;
@@ -1552,6 +1656,8 @@ function TaskList({
   onEditTask: (task: Task) => void;
   onMoveTaskToday: (id: string) => void;
   onMoveTaskWaiting: (id: string) => void;
+  onMoveTaskSpace: (task: Task) => void;
+  moveTaskSpaceLabel: string;
 }) {
   if (!tasks.length) return <EmptyState text={emptyText} />;
   return (
@@ -1595,6 +1701,9 @@ function TaskList({
                       Wait
                     </button>
                   ) : null}
+                  <button className="secondary-button" type="button" onClick={() => onMoveTaskSpace(task)}>
+                    {moveTaskSpaceLabel}
+                  </button>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -1722,6 +1831,9 @@ function MeetingEditor({
           Details{detailsSummary ? <span className="ml-2 font-semibold text-[#53635c]">{detailsSummary}</span> : null}
         </summary>
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="lg:col-span-2">
+            <SpaceField value={draft.space} onChange={(space) => onChange({ space })} />
+          </div>
           <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="project-options" />
           <LabeledInput label="Date" type="date" value={draft.date} onChange={(value) => onChange({ date: value })} />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1780,6 +1892,9 @@ function TaskEditor({
     >
       <div className="grid gap-3 lg:grid-cols-2">
         <LabeledInput label="Title" value={draft.title} onChange={(value) => onChange({ title: value })} autoFocus />
+        <div className="lg:col-span-2">
+          <SpaceField value={draft.space} onChange={(space) => onChange({ space })} />
+        </div>
         <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="task-project-options" />
         <SelectField label="Status" value={draft.status} values={TASK_STATUSES} onChange={(value) => onChange({ status: value as TaskStatus })} />
         <SelectField label="Priority" value={draft.priority} values={TASK_PRIORITIES} onChange={(value) => onChange({ priority: value as TaskPriority })} />
@@ -1855,6 +1970,9 @@ function TopicEditor({
     >
       <div className="grid gap-3 lg:grid-cols-2">
         <LabeledInput label="Topic" value={draft.title} onChange={(value) => onChange({ title: value })} autoFocus />
+        <div className="lg:col-span-2">
+          <SpaceField value={draft.space} onChange={(space) => onChange({ space })} />
+        </div>
         <LabeledInput label="Project" value={draft.project} onChange={(value) => onChange({ project: value })} list="topic-project-options" />
       </div>
       <datalist id="topic-project-options">
@@ -2176,6 +2294,27 @@ function SelectField({
         ))}
       </select>
     </label>
+  );
+}
+
+function SpaceField({ value, onChange }: { value: Space; onChange: (space: Space) => void }) {
+  return (
+    <fieldset className="grid gap-2 text-sm font-semibold text-[#53635c]">
+      <legend className="mb-2">Space</legend>
+      <div className="grid grid-cols-2 gap-2 rounded-md border border-[#cfd9d4] bg-[#f7f9f8] p-1">
+        {SPACES.map((space) => (
+          <button
+            key={space}
+            className={value === space ? "rounded bg-white px-3 py-2 text-[#17201c] shadow-sm" : "rounded px-3 py-2 text-[#53635c]"}
+            type="button"
+            aria-pressed={value === space}
+            onClick={() => onChange(space)}
+          >
+            {spaceLabel(space)}
+          </button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -2543,7 +2682,45 @@ function buildNoteNodes(text: string, maxLines: number): NoteNode[] {
   return nodes;
 }
 
-function normalizeLoadedState(raw: unknown): AppState {
+function buildStateChanges(previous: AppState, next: AppState): StateChanges {
+  return {
+    meetings: diffEntities(previous.meetings, next.meetings),
+    tasks: diffEntities(previous.tasks, next.tasks),
+    topics: diffEntities(previous.topics, next.topics),
+  };
+}
+
+function diffEntities<T extends { id: string }>(previous: T[], next: T[]) {
+  const previousById = new Map(previous.map((item) => [item.id, item]));
+  const nextIds = new Set(next.map((item) => item.id));
+  return {
+    upsert: next.filter((item) => JSON.stringify(previousById.get(item.id)) !== JSON.stringify(item)),
+    deleteIds: previous.filter((item) => !nextIds.has(item.id)).map((item) => item.id),
+  };
+}
+
+function stateInSpace(state: AppState, space: Space): AppState {
+  return {
+    ...state,
+    meetings: state.meetings.map((meeting) => ({ ...meeting, space })),
+    tasks: state.tasks.map((task) => ({ ...task, space })),
+    topics: state.topics.map((topic) => ({ ...topic, space })),
+  };
+}
+
+function normalizeSpace(value: unknown, fallback: Space): Space {
+  return value === "work" || value === "personal" ? value : fallback;
+}
+
+function otherSpace(space: Space): Space {
+  return space === "work" ? "personal" : "work";
+}
+
+function spaceLabel(space: Space) {
+  return space === "work" ? "Work" : "Personal";
+}
+
+function normalizeLoadedState(raw: unknown, fallbackSpace: Space = "work"): AppState {
   const source = raw && typeof raw === "object" ? (raw as Partial<AppState> & { notes?: unknown }) : EMPTY_STATE;
   const legacyMeetings = Array.isArray(source.notes)
     ? source.notes
@@ -2553,24 +2730,25 @@ function normalizeLoadedState(raw: unknown): AppState {
           return normalizeMeeting({
             ...data,
             notes: typeof data.content === "string" ? data.content : data.notes,
-          });
+          }, fallbackSpace);
         })
         .filter((meeting): meeting is Meeting => Boolean(meeting))
     : [];
 
   return {
-    meetings: [...(Array.isArray(source.meetings) ? source.meetings : []), ...legacyMeetings].map(normalizeMeeting),
-    tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(normalizeTask),
-    topics: (Array.isArray(source.topics) ? source.topics : []).map(normalizeTopic),
+    meetings: [...(Array.isArray(source.meetings) ? source.meetings : []), ...legacyMeetings].map((meeting) => normalizeMeeting(meeting, fallbackSpace)),
+    tasks: (Array.isArray(source.tasks) ? source.tasks : []).map((task) => normalizeTask(task, fallbackSpace)),
+    topics: (Array.isArray(source.topics) ? source.topics : []).map((topic) => normalizeTopic(topic, fallbackSpace)),
     notes: [],
     imports: Array.isArray(source.imports) ? source.imports.filter((item): item is string => typeof item === "string") : [],
   };
 }
 
-function normalizeMeeting(raw: Partial<Meeting>): Meeting {
+function normalizeMeeting(raw: Partial<Meeting>, fallbackSpace: Space): Meeting {
   const now = new Date().toISOString();
   return {
     id: cleanText(raw.id) || createId(),
+    space: normalizeSpace(raw.space, fallbackSpace),
     calendarUid: cleanText(raw.calendarUid),
     title: cleanText(raw.title) || "Untitled meeting",
     project: cleanText(raw.project),
@@ -2585,10 +2763,11 @@ function normalizeMeeting(raw: Partial<Meeting>): Meeting {
   };
 }
 
-function normalizeTask(raw: Partial<Task>): Task {
+function normalizeTask(raw: Partial<Task>, fallbackSpace: Space): Task {
   const now = new Date().toISOString();
   return {
     id: cleanText(raw.id) || createId(),
+    space: normalizeSpace(raw.space, fallbackSpace),
     title: cleanText(raw.title),
     project: cleanText(raw.project) || "Inbox",
     status: pickValue(raw.status, TASK_STATUSES, "Inbox"),
@@ -2601,11 +2780,12 @@ function normalizeTask(raw: Partial<Task>): Task {
     notes: cleanText(raw.notes),
     meetingId: cleanText(raw.meetingId),
     createdAt: cleanText(raw.createdAt) || now,
+    updatedAt: cleanText(raw.updatedAt) || cleanText(raw.createdAt) || now,
     completedAt: cleanText(raw.completedAt),
   };
 }
 
-function normalizeTopic(raw: Partial<Topic>): Topic {
+function normalizeTopic(raw: Partial<Topic>, fallbackSpace: Space): Topic {
   const now = new Date().toISOString();
   const id = cleanText(raw.id) || createId();
   const legacyNotes = cleanText(raw.notes);
@@ -2625,6 +2805,7 @@ function normalizeTopic(raw: Partial<Topic>): Topic {
       }];
   return {
     id,
+    space: normalizeSpace(raw.space, fallbackSpace),
     title: cleanText(raw.title),
     project: cleanText(raw.project) || "Inbox",
     notes: normalizedPages[0]?.notes || legacyNotes,
@@ -2645,10 +2826,11 @@ function normalizeTopicPage(raw: Partial<TopicPage>, fallbackTitle: string): Top
   };
 }
 
-function blankMeeting(date: string): Meeting {
+function blankMeeting(date: string, space: Space): Meeting {
   const now = new Date().toISOString();
   return {
     id: createId(),
+    space,
     calendarUid: "",
     title: "",
     project: "",
@@ -2663,9 +2845,11 @@ function blankMeeting(date: string): Meeting {
   };
 }
 
-function blankTask(project: string): Task {
+function blankTask(project: string, space: Space): Task {
+  const now = new Date().toISOString();
   return {
     id: createId(),
+    space,
     title: "",
     project,
     status: "Next",
@@ -2677,16 +2861,18 @@ function blankTask(project: string): Task {
     due: "",
     notes: "",
     meetingId: "",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     completedAt: "",
   };
 }
 
-function blankTopic(project: string): Topic {
+function blankTopic(project: string, space: Space): Topic {
   const now = new Date().toISOString();
   const page = blankTopicPage("Notes");
   return {
     id: createId(),
+    space,
     title: "",
     project,
     notes: "",
@@ -2757,6 +2943,7 @@ function parseIcsEvent(eventText: string): Meeting | null {
 
   return {
     id: `ics-${slugify(instanceUid)}`,
+    space: "work",
     calendarUid: instanceUid,
     title: firstIcsValue(props, "SUMMARY") || "Imported calendar event",
     project: "",

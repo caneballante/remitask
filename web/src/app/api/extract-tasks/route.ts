@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
 function taskFromMarkedLine(title: string, meeting: Meeting): TaskSuggestion {
   return {
     selected: true,
+    space: meeting.space,
     title,
     project: meeting.project || "Inbox",
     status: "Next",
@@ -45,6 +46,7 @@ function taskFromMarkedLine(title: string, meeting: Meeting): TaskSuggestion {
 function normalizeMeeting(meeting: Partial<Meeting>): Meeting {
   return {
     id: cleanText(meeting.id),
+    space: meeting.space === "personal" ? "personal" : "work",
     calendarUid: cleanText(meeting.calendarUid),
     title: cleanText(meeting.title) || "Untitled meeting",
     project: cleanText(meeting.project),

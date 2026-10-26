@@ -492,9 +492,9 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
         selected: true,
         space: savedMeeting.space,
         title,
-        project: savedMeeting.project || "Inbox",
-        status: "Next",
-        priority: "P2",
+        project: savedMeeting.project || "General",
+        status: "Today",
+        priority: "P1",
         effort: "Quick",
         energy: "Normal",
         context: "Follow-up",
@@ -541,7 +541,7 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
         id: createId(),
         space: suggestion.space,
         title: suggestion.title.trim(),
-        project: suggestion.project.trim() || "Inbox",
+        project: suggestion.project.trim() || "General",
         status: suggestion.status,
         priority: suggestion.priority,
         effort: suggestion.effort,
@@ -568,7 +568,7 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
   }
 
   function openTaskEditor(task?: Task, project?: string) {
-    const draft = task ? { ...task } : blankTask(project || projects[0] || "Inbox", space);
+    const draft = task ? { ...task } : blankTask(project || "General", space);
     taskDraftBaselineRef.current = draftSnapshot(draft);
     setTaskDraft(draft);
   }
@@ -598,7 +598,7 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
     const nextTask: Task = {
       ...taskDraft,
       title: taskDraft.title.trim(),
-      project: taskDraft.project.trim() || "Inbox",
+      project: taskDraft.project.trim() || "General",
       owner: taskDraft.owner.trim(),
       notes: taskDraft.notes.trim(),
       createdAt: existing?.createdAt || taskDraft.createdAt || now,
@@ -707,7 +707,7 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
 
   function makeTaskFromTopic(topic: Topic) {
     const page = topicPreviewPage(topic);
-    const blankDraft = blankTask(topic.project || "Inbox", topic.space);
+    const blankDraft = blankTask(topic.project || "General", topic.space);
     taskDraftBaselineRef.current = draftSnapshot(blankDraft);
     setTaskDraft({
       ...blankDraft,
@@ -1033,7 +1033,15 @@ export function RemiTaskApp({ space = "work" }: { space?: Space }) {
       </section>
 
       {meetingDraft ? (
-        <Modal title={meetingDraft.title || "Meeting"} onClose={closeMeetingEditor}>
+        <Modal
+          title={meetingDraft.title || "Meeting"}
+          onClose={closeMeetingEditor}
+          headerActions={
+            <button className="primary-button" type="button" onClick={() => saveMeetingDraft()}>
+              Save and close
+            </button>
+          }
+        >
           <MeetingEditor
             draft={meetingDraft}
             projects={projects}
@@ -2852,8 +2860,8 @@ function blankTask(project: string, space: Space): Task {
     space,
     title: "",
     project,
-    status: "Next",
-    priority: "P2",
+    status: "Today",
+    priority: "P1",
     effort: "Quick",
     energy: "Normal",
     context: "Follow-up",
